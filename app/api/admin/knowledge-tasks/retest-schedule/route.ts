@@ -1,0 +1,67 @@
+import { NextResponse } from "next/server";
+import { requireAdmin } from "@/lib/db";
+import {
+  getKnowledgeTaskRetestSchedule,
+  runKnowledgeTaskRetestScheduleNow,
+  updateKnowledgeTaskRetestSchedule
+} from "@/lib/knowledge-task-retest-schedule";
+
+export const dynamic = "force-dynamic";
+
+export async function GET() {
+  try {
+    await requireAdmin();
+    const schedule = await getKnowledgeTaskRetestSchedule();
+
+    return NextResponse.json({ schedule });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "读取整改复测计划失败" },
+      { status: 400 }
+    );
+  }
+}
+
+export async function PUT(request: Request) {
+  try {
+    const user = await requireAdmin();
+    const body = await request.json().catch(() => ({}));
+    const schedule = await updateKnowledgeTaskRetestSchedule(
+      {
+        enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
+        mode: body.mode,
+        limit: body.limit,
+        interval_minutes: body.interval_minutes,
+        next_run_at: body.next_run_at
+      },
+      user.id
+    );
+
+    return NextResponse.json({ schedule });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "保存整改复测计划失败" },
+      { status: 400 }
+    );
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const user = await requireAdmin();
+    const body = await request.json().catch(() => ({}));
+
+    if (body.action && body.action !== "run_now") {
+      return NextResponse.json({ error: "不支持的计划操作" }, { status: 400 });
+    }
+
+    const result = await runKnowledgeTaskRetestScheduleNow(user.id);
+
+    return NextResponse.json(result);
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "启动计划复测失败" },
+      { status: 400 }
+    );
+  }
+}
