@@ -8,6 +8,7 @@ import {
   updateTrainingVideoJob
 } from "@/lib/db";
 import { env, hasDigitalHumanConfig } from "@/lib/config";
+import { canAccessTrainingJob } from "@/lib/training-access";
 import { queryDigitalHumanVideoStatus, submitDigitalHumanVideo, summarizeTrainingScript } from "@/lib/digital-human";
 import { mergeTrainingListSnapshot } from "@/lib/training-list-cache";
 import { startTrainingSlideVideoJob } from "@/lib/training-video-job";
@@ -27,8 +28,8 @@ export async function GET(_request: Request, context: RouteContext) {
       return NextResponse.json({ error: "培训任务不存在" }, { status: 404 });
     }
 
-    if (user.role !== "admin" && (trainingJob.publish_status !== "published" || trainingJob.status !== "ready")) {
-      return NextResponse.json({ error: "课程未发布" }, { status: 403 });
+    if (!canAccessTrainingJob(user, trainingJob)) {
+      return NextResponse.json({ error: "无权访问该课程" }, { status: 403 });
     }
 
     const videoJobs = await refreshPendingVideoJobs(trainingJob, await listTrainingVideoJobs(id));

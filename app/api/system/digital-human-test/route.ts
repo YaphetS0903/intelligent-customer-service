@@ -35,6 +35,10 @@ export async function POST() {
     const testJob: TrainingJob = {
       id: "digital-human-connectivity-test",
       title: "数字人接口连通性测试",
+      description: "用于验证数字人接口连通性。",
+      instructor: "系统管理员",
+      cover_url: null,
+      visible_departments: [],
       ppt_file_name: "connectivity-test.pptx",
       ppt_storage_path: null,
       script_json: [

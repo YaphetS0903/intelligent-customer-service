@@ -4,6 +4,7 @@ import path from "path";
 import { Readable } from "stream";
 import { NextResponse } from "next/server";
 import { getCurrentUser, getTrainingJob, getTrainingVideoJob } from "@/lib/db";
+import { canAccessTrainingJob } from "@/lib/training-access";
 import { createSupabaseAdminClient } from "@/lib/supabase/server";
 import { loadTrainingListSnapshot } from "@/lib/training-list-cache";
 import { readTrainingVideoBinary } from "@/lib/training-video-render";
@@ -34,8 +35,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: "课程视频不存在" }, { status: 404 });
     }
 
-    if (user.role !== "admin" && (trainingJob.publish_status !== "published" || trainingJob.status !== "ready")) {
-      return NextResponse.json({ error: "课程未发布" }, { status: 403 });
+    if (!canAccessTrainingJob(user, trainingJob)) {
+      return NextResponse.json({ error: "无权访问该课程" }, { status: 403 });
     }
 
     if (videoJob.status !== "ready") {

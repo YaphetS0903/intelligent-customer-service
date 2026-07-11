@@ -246,6 +246,10 @@ async function ensureDemoTrainingJob(createdBy: string) {
 
   await createTrainingJob({
     title: demoTrainingTitle,
+    description: "面向车间员工的安全与质量基础培训。",
+    instructor: "安全质量部",
+    cover_url: null,
+    visible_departments: [],
     ppt_file_name: "车间安全与质量培训-演示.pptx",
     ppt_storage_path: null,
     script_json: [

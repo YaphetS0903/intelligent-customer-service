@@ -112,8 +112,20 @@ function normalizeSnapshot(value: unknown): TrainingListSnapshot | null {
   }
 
   return {
-    trainingJobs: snapshot.trainingJobs,
-    trainingProgress: snapshot.trainingProgress,
+    trainingJobs: snapshot.trainingJobs.map((job) => ({
+      ...job,
+      description: job.description ?? "",
+      instructor: job.instructor ?? "",
+      cover_url: job.cover_url ?? null,
+      visible_departments: Array.isArray(job.visible_departments) ? job.visible_departments : []
+    })),
+    trainingProgress: snapshot.trainingProgress.map((progress) => ({
+      ...progress,
+      page_learning_seconds: progress.page_learning_seconds ?? {},
+      total_learning_seconds: progress.total_learning_seconds ?? 0,
+      playback_position_seconds: progress.playback_position_seconds ?? 0,
+      last_active_at: progress.last_active_at ?? null
+    })),
     videoJobs: snapshot.videoJobs,
     updatedAt: snapshot.updatedAt
   };

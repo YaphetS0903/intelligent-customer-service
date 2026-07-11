@@ -1,14 +1,13 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser, getTrainingJob, getTrainingProgress, upsertTrainingProgress } from "@/lib/db";
+import { canAccessTrainingJob } from "@/lib/training-access";
+import { applyTrainingHeartbeat } from "@/lib/training-progress";
 
-type RouteContext = {
-  params: Promise<{ id: string }>;
-};
+type RouteContext = { params: Promise<{ id: string }> };
 
-function normalizePages(value: unknown, totalPages: number) {
-  const values = Array.isArray(value) ? value : [];
-  return [...new Set(values.map((item) => Number(item)).filter((item) => Number.isInteger(item) && item >= 0 && item < totalPages))]
-    .sort((a, b) => a - b);
+function boundedNumber(value: unknown, minimum: number, maximum: number) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(Math.max(number, minimum), maximum) : minimum;
 }
 
 export async function GET(_request: Request, { params }: RouteContext) {
@@ -16,23 +15,11 @@ export async function GET(_request: Request, { params }: RouteContext) {
     const user = await getCurrentUser();
     const { id } = await params;
     const job = await getTrainingJob(id);
-
-    if (!job) {
-      return NextResponse.json({ error: "课程不存在" }, { status: 404 });
-    }
-
-    if (user.role !== "admin" && (job.publish_status !== "published" || job.status !== "ready")) {
-      return NextResponse.json({ error: "课程未发布" }, { status: 403 });
-    }
-
-    const progress = await getTrainingProgress(id, user.id);
-
-    return NextResponse.json({ progress });
+    if (!job) return NextResponse.json({ error: "课程不存在" }, { status: 404 });
+    if (!canAccessTrainingJob(user, job)) return NextResponse.json({ error: "无权访问该课程" }, { status: 403 });
+    return NextResponse.json({ progress: await getTrainingProgress(id, user.id) });
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "读取学习进度失败" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: error instanceof Error ? error.message : "读取学习进度失败" }, { status: 400 });
   }
 }
 
@@ -41,35 +28,29 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     const user = await getCurrentUser();
     const { id } = await params;
     const job = await getTrainingJob(id);
-
-    if (!job) {
-      return NextResponse.json({ error: "课程不存在" }, { status: 404 });
-    }
-
-    if (user.role !== "admin" && (job.publish_status !== "published" || job.status !== "ready")) {
-      return NextResponse.json({ error: "课程未发布" }, { status: 403 });
-    }
+    if (!job) return NextResponse.json({ error: "课程不存在" }, { status: 404 });
+    if (!canAccessTrainingJob(user, job)) return NextResponse.json({ error: "无权访问该课程" }, { status: 403 });
 
     const body = await request.json();
-    const currentPage = Math.min(Math.max(Number(body.current_page ?? 0), 0), Math.max(job.script_json.length - 1, 0));
-    const completedPages = normalizePages(body.completed_pages, job.script_json.length);
-    const progressPercent = job.script_json.length === 0
-      ? 0
-      : Math.round((completedPages.length / job.script_json.length) * 100);
+    const existing = await getTrainingProgress(id, user.id);
+    const pageIndex = Math.round(boundedNumber(body.current_page, 0, Math.max(job.script_json.length - 1, 0)));
+    const now = new Date().toISOString();
+    const next = applyTrainingHeartbeat({
+      job,
+      existing,
+      pageIndex,
+      consumedSecondsDelta: boundedNumber(body.consumed_seconds_delta, 0, 30),
+      activeSecondsDelta: boundedNumber(body.active_seconds_delta, 0, 15),
+      playbackPositionSeconds: boundedNumber(body.playback_position_seconds, 0, 24 * 60 * 60),
+      now: new Date(now)
+    });
     const progress = await upsertTrainingProgress({
       training_job_id: id,
       user_id: user.id,
-      completed_pages: completedPages,
-      current_page: currentPage,
-      progress_percent: progressPercent,
-      completed_at: progressPercent >= 100 ? new Date().toISOString() : null
+      ...next
     });
-
     return NextResponse.json({ progress });
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "保存学习进度失败" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: error instanceof Error ? error.message : "保存学习进度失败" }, { status: 400 });
   }
 }

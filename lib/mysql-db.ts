@@ -39,6 +39,7 @@ import type {
   ServiceTicketComment,
   ServiceTicketPriority,
   TrainingJob,
+  TrainingAuditEvent,
   TrainingProgress,
   TrainingQuizAttempt,
   TrainingVideoJob,
@@ -508,6 +509,10 @@ function trainingFromRow(row: Row): TrainingJob {
   return {
     id: row.id,
     title: row.title,
+    description: row.description ?? "",
+    instructor: row.instructor ?? "",
+    cover_url: row.cover_url ?? null,
+    visible_departments: parseJson<string[]>(row.visible_departments, []),
     ppt_file_name: row.ppt_file_name,
     ppt_storage_path: row.ppt_storage_path,
     script_json: parseJson<TrainingJob["script_json"]>(row.script_json, []),
@@ -529,6 +534,10 @@ function trainingProgressFromRow(row: Row): TrainingProgress {
     completed_pages: parseJson<number[]>(row.completed_pages, []),
     current_page: Number(row.current_page ?? 0),
     progress_percent: Number(row.progress_percent ?? 0),
+    page_learning_seconds: parseJson<Record<string, number>>(row.page_learning_seconds, {}),
+    total_learning_seconds: Number(row.total_learning_seconds ?? 0),
+    playback_position_seconds: Number(row.playback_position_seconds ?? 0),
+    last_active_at: row.last_active_at ? toIsoString(row.last_active_at) : null,
     completed_at: row.completed_at ? toIsoString(row.completed_at) : null,
     created_at: toIsoString(row.created_at),
     updated_at: toIsoString(row.updated_at ?? row.created_at)
@@ -2459,12 +2468,13 @@ export async function createTrainingJob(input: Omit<TrainingJob, "id" | "created
   };
   await mysqlExecute(
     `insert into training_jobs
-      (id, title, ppt_file_name, ppt_storage_path, script_json, audio_paths, status, publish_status, published_by, published_at, created_by, created_at)
-      values (:id, :title, :ppt_file_name, :ppt_storage_path, :script_json, :audio_paths, :status, :publish_status, :published_by, :published_at, :created_by, :created_at)`,
+      (id, title, description, instructor, cover_url, visible_departments, ppt_file_name, ppt_storage_path, script_json, audio_paths, status, publish_status, published_by, published_at, created_by, created_at)
+      values (:id, :title, :description, :instructor, :cover_url, :visible_departments, :ppt_file_name, :ppt_storage_path, :script_json, :audio_paths, :status, :publish_status, :published_by, :published_at, :created_by, :created_at)`,
     {
       ...record,
       script_json: JSON.stringify(record.script_json),
-      audio_paths: JSON.stringify(record.audio_paths)
+      audio_paths: JSON.stringify(record.audio_paths),
+      visible_departments: JSON.stringify(record.visible_departments)
     }
   );
   return record;
@@ -2472,7 +2482,7 @@ export async function createTrainingJob(input: Omit<TrainingJob, "id" | "created
 
 export async function updateTrainingJob(
   id: string,
-  input: Partial<Pick<TrainingJob, "script_json" | "audio_paths" | "status" | "title" | "publish_status" | "published_by" | "published_at">>
+  input: Partial<Pick<TrainingJob, "script_json" | "audio_paths" | "status" | "title" | "description" | "instructor" | "cover_url" | "visible_departments" | "publish_status" | "published_by" | "published_at">>
 ) {
   const existing = await getTrainingJob(id);
   if (!existing) {
@@ -2482,6 +2492,10 @@ export async function updateTrainingJob(
   await mysqlExecute(
     `update training_jobs set
       title = :title,
+      description = :description,
+      instructor = :instructor,
+      cover_url = :cover_url,
+      visible_departments = :visible_departments,
       script_json = :script_json,
       audio_paths = :audio_paths,
       status = :status,
@@ -2492,6 +2506,10 @@ export async function updateTrainingJob(
     {
       id,
       title: next.title,
+      description: next.description,
+      instructor: next.instructor,
+      cover_url: next.cover_url,
+      visible_departments: JSON.stringify(next.visible_departments),
       script_json: JSON.stringify(next.script_json),
       audio_paths: JSON.stringify(next.audio_paths),
       status: next.status,
@@ -2665,6 +2683,10 @@ export async function upsertTrainingProgress(input: {
   completed_pages: number[];
   current_page: number;
   progress_percent: number;
+  page_learning_seconds: Record<string, number>;
+  total_learning_seconds: number;
+  playback_position_seconds: number;
+  last_active_at: string | null;
   completed_at: string | null;
 }) {
   const existing = await getTrainingProgress(input.training_job_id, input.user_id);
@@ -2679,11 +2701,12 @@ export async function upsertTrainingProgress(input: {
     };
     await mysqlExecute(
       `insert into training_progress
-        (id, training_job_id, user_id, completed_pages, current_page, progress_percent, completed_at, created_at, updated_at)
-        values (:id, :training_job_id, :user_id, :completed_pages, :current_page, :progress_percent, :completed_at, :created_at, :updated_at)`,
+        (id, training_job_id, user_id, completed_pages, current_page, progress_percent, page_learning_seconds, total_learning_seconds, playback_position_seconds, last_active_at, completed_at, created_at, updated_at)
+        values (:id, :training_job_id, :user_id, :completed_pages, :current_page, :progress_percent, :page_learning_seconds, :total_learning_seconds, :playback_position_seconds, :last_active_at, :completed_at, :created_at, :updated_at)`,
       {
         ...record,
-        completed_pages: JSON.stringify(record.completed_pages)
+        completed_pages: JSON.stringify(record.completed_pages),
+        page_learning_seconds: JSON.stringify(record.page_learning_seconds)
       }
     );
     return record;
@@ -2694,6 +2717,10 @@ export async function upsertTrainingProgress(input: {
       completed_pages = :completed_pages,
       current_page = :current_page,
       progress_percent = :progress_percent,
+      page_learning_seconds = :page_learning_seconds,
+      total_learning_seconds = :total_learning_seconds,
+      playback_position_seconds = :playback_position_seconds,
+      last_active_at = :last_active_at,
       completed_at = :completed_at,
       updated_at = :updated_at
       where id = :id`,
@@ -2702,6 +2729,10 @@ export async function upsertTrainingProgress(input: {
       completed_pages: JSON.stringify(input.completed_pages),
       current_page: input.current_page,
       progress_percent: input.progress_percent,
+      page_learning_seconds: JSON.stringify(input.page_learning_seconds),
+      total_learning_seconds: input.total_learning_seconds,
+      playback_position_seconds: input.playback_position_seconds,
+      last_active_at: input.last_active_at,
       completed_at: input.completed_at,
       updated_at: now
     }
@@ -2721,6 +2752,39 @@ export async function listTrainingQuizAttempts(trainingJobId: string, userId: st
 export async function listAllTrainingQuizAttempts() {
   const rows = await mysqlQuery<Row[]>("select * from training_quiz_attempts order by created_at desc");
   return rows.map(trainingQuizAttemptFromRow);
+}
+
+export async function createTrainingAuditEvent(input: Omit<TrainingAuditEvent, "id" | "created_at">) {
+  const record: TrainingAuditEvent = {
+    id: createId("training-audit"),
+    created_at: new Date().toISOString(),
+    ...input
+  };
+  await mysqlExecute(
+    `insert into training_audit_events
+      (id, training_job_id, actor_id, action, detail, metadata, created_at)
+      values (:id, :training_job_id, :actor_id, :action, :detail, :metadata, :created_at)`,
+    { ...record, metadata: JSON.stringify(record.metadata) }
+  );
+  return record;
+}
+
+export async function listTrainingAuditEvents(trainingJobId?: string) {
+  const rows = trainingJobId
+    ? await mysqlQuery<Row[]>(
+        "select * from training_audit_events where training_job_id = :trainingJobId order by created_at desc",
+        { trainingJobId }
+      )
+    : await mysqlQuery<Row[]>("select * from training_audit_events order by created_at desc");
+  return rows.map((row): TrainingAuditEvent => ({
+    id: row.id,
+    training_job_id: row.training_job_id,
+    actor_id: row.actor_id,
+    action: row.action,
+    detail: row.detail,
+    metadata: parseJson<Record<string, unknown>>(row.metadata, {}),
+    created_at: toIsoString(row.created_at)
+  }));
 }
 
 export async function createTrainingQuizAttempt(input: Omit<TrainingQuizAttempt, "id" | "created_at">) {

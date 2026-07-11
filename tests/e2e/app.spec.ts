@@ -4,9 +4,10 @@ let demoSeedPromise: Promise<void> | null = null;
 
 async function tryLogin(page: Page, role: "admin" | "employee" = "admin") {
   const testPassword = process.env.E2E_TEST_PASSWORD || "local-e2e-password";
+  const employeeEmail = process.env.E2E_EMPLOYEE_EMAIL || "test.employee@tianrui.local";
   const credentials = role === "admin"
     ? { email: process.env.INITIAL_ADMIN_EMAIL || "admin@e2e.local", password: process.env.INITIAL_ADMIN_PASSWORD || testPassword }
-    : { email: "test.employee@tianrui.local", password: testPassword };
+    : { email: employeeEmail, password: testPassword };
 
   let lastError = "";
 
@@ -51,9 +52,10 @@ async function loginWithCredentials(page: Page, email: string, password: string)
 }
 
 async function ensureEmployeeAccount(page: Page) {
+  const employeeEmail = process.env.E2E_EMPLOYEE_EMAIL || "test.employee@tianrui.local";
   const response = await page.request.post("/api/auth/register", {
     data: {
-      email: "test.employee@tianrui.local",
+      email: employeeEmail,
       password: process.env.E2E_TEST_PASSWORD || "local-e2e-password",
       name: "测试员工",
       department: "生产部",
@@ -1163,5 +1165,38 @@ test.describe("天瑞内饰智能客服回归", () => {
 
     await expectHeadingWithReload(page, "/training", "培训讲解");
     await expect(page.getByText(/查看已生成的 PPT 逐页讲稿/)).toBeVisible();
+  });
+
+  test("培训管理支持课程资料、部门筛选与导出", async ({ page }) => {
+    test.setTimeout(240_000);
+    await tryLogin(page);
+    await gotoWithRetry(page, "/admin/training");
+
+    await expect(page.getByRole("heading", { name: "课程资料与可见范围" })).toBeVisible();
+    await expect(page.getByPlaceholder("课程简介").last()).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "筛选部门" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "导出" })).toBeEnabled();
+  });
+
+  test("员工培训播放器提供倍速、续播和可信完课提示", async ({ page }) => {
+    test.setTimeout(240_000);
+    await tryLogin(page, "employee");
+    const courses = await page.request.get("/api/training", { failOnStatusCode: false });
+    expect(courses.ok(), await courses.text()).toBeTruthy();
+    const payload = await courses.json() as { trainingJobs: Array<{ id: string }> };
+    expect(payload.trainingJobs.length).toBeGreaterThan(0);
+
+    await gotoWithRetry(page, `/training/${payload.trainingJobs[0].id}`);
+    await expect(page.getByRole("combobox", { name: "播放速度" })).toBeVisible();
+    await expect(page.getByText(/拖动或仅翻页不会直接完课/)).toBeVisible();
+
+    const progress = await page.request.patch(`/api/training/${payload.trainingJobs[0].id}/progress`, {
+      data: { current_page: 0, consumed_seconds_delta: 0, active_seconds_delta: 0, playback_position_seconds: 12 },
+      failOnStatusCode: false
+    });
+    expect(progress.ok(), await progress.text()).toBeTruthy();
+    const saved = (await progress.json()).progress as { completed_pages: number[]; playback_position_seconds: number };
+    expect(saved.completed_pages).not.toContain(0);
+    expect(saved.playback_position_seconds).toBe(12);
   });
 });

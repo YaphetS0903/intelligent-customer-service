@@ -36,6 +36,7 @@ import type {
   ServiceTicketComment,
   ServiceTicketPriority,
   TrainingJob,
+  TrainingAuditEvent,
   TrainingProgress,
   TrainingQuizAttempt,
   TrainingVideoJob,
@@ -3005,7 +3006,7 @@ export async function createTrainingJob(input: Omit<TrainingJob, "id" | "created
 
 export async function updateTrainingJob(
   id: string,
-  input: Partial<Pick<TrainingJob, "script_json" | "audio_paths" | "status" | "title" | "publish_status" | "published_by" | "published_at">>
+  input: Partial<Pick<TrainingJob, "script_json" | "audio_paths" | "status" | "title" | "description" | "instructor" | "cover_url" | "visible_departments" | "publish_status" | "published_by" | "published_at">>
 ): Promise<TrainingJob> {
   if (isMySqlDatabase()) {
     return mysqlDb.updateTrainingJob(id, input);
@@ -3307,6 +3308,10 @@ export async function upsertTrainingProgress(input: {
   completed_pages: number[];
   current_page: number;
   progress_percent: number;
+  page_learning_seconds: Record<string, number>;
+  total_learning_seconds: number;
+  playback_position_seconds: number;
+  last_active_at: string | null;
   completed_at: string | null;
 }): Promise<TrainingProgress> {
   if (isMySqlDatabase()) {
@@ -3363,6 +3368,44 @@ export async function upsertTrainingProgress(input: {
   }
 
   return data;
+}
+
+export async function createTrainingAuditEvent(
+  input: Omit<TrainingAuditEvent, "id" | "created_at">
+): Promise<TrainingAuditEvent> {
+  if (isMySqlDatabase()) {
+    return mysqlDb.createTrainingAuditEvent(input);
+  }
+
+  const record: TrainingAuditEvent = {
+    id: createId("training-audit"),
+    created_at: new Date().toISOString(),
+    ...input
+  };
+  const supabase = createSupabaseAdminClient();
+  if (!supabase) {
+    memoryStore.trainingAuditEvents.unshift(record);
+    return record;
+  }
+  const { data, error } = await supabase.from("training_audit_events").insert(record).select("*").single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function listTrainingAuditEvents(trainingJobId?: string): Promise<TrainingAuditEvent[]> {
+  if (isMySqlDatabase()) {
+    return mysqlDb.listTrainingAuditEvents(trainingJobId);
+  }
+
+  const supabase = createSupabaseAdminClient();
+  if (!supabase) {
+    return memoryStore.trainingAuditEvents.filter((item) => !trainingJobId || item.training_job_id === trainingJobId);
+  }
+  let query = supabase.from("training_audit_events").select("*").order("created_at", { ascending: false });
+  if (trainingJobId) query = query.eq("training_job_id", trainingJobId);
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return data ?? [];
 }
 
 export async function listTrainingQuizAttempts(trainingJobId: string, userId: string): Promise<TrainingQuizAttempt[]> {

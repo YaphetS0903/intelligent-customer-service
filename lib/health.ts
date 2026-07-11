@@ -130,6 +130,7 @@ const schemaTables = [
   "training_jobs",
   "training_video_jobs",
   "training_progress",
+  "training_audit_events",
   "training_quiz_attempts",
   "qa_test_cases"
 ];

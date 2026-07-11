@@ -504,6 +504,10 @@ export type SecurityEvent = {
 export type TrainingJob = {
   id: string;
   title: string;
+  description: string;
+  instructor: string;
+  cover_url: string | null;
+  visible_departments: string[];
   ppt_file_name: string;
   ppt_storage_path: string | null;
   script_json: Array<{
@@ -548,9 +552,23 @@ export type TrainingProgress = {
   completed_pages: number[];
   current_page: number;
   progress_percent: number;
+  page_learning_seconds: Record<string, number>;
+  total_learning_seconds: number;
+  playback_position_seconds: number;
+  last_active_at: string | null;
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type TrainingAuditEvent = {
+  id: string;
+  training_job_id: string;
+  actor_id: string;
+  action: "created" | "updated" | "published" | "unpublished" | "archived" | "audio_regenerated";
+  detail: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
 };
 
 export type TrainingQuizAttempt = {

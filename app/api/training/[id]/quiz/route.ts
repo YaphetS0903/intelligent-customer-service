@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createTrainingQuizAttempt, getCurrentUser, getTrainingJob, listTrainingQuizAttempts } from "@/lib/db";
 import { buildTrainingQuiz, gradeTrainingQuiz } from "@/lib/training-quiz";
+import { canAccessTrainingJob } from "@/lib/training-access";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -16,8 +17,8 @@ export async function GET(_request: Request, { params }: RouteContext) {
       return NextResponse.json({ error: "课程不存在" }, { status: 404 });
     }
 
-    if (user.role !== "admin" && (job.publish_status !== "published" || job.status !== "ready")) {
-      return NextResponse.json({ error: "课程未发布" }, { status: 403 });
+    if (!canAccessTrainingJob(user, job)) {
+      return NextResponse.json({ error: "无权访问该课程" }, { status: 403 });
     }
 
     const attempts = await listTrainingQuizAttempts(id, user.id);
@@ -45,8 +46,8 @@ export async function POST(request: Request, { params }: RouteContext) {
       return NextResponse.json({ error: "课程不存在" }, { status: 404 });
     }
 
-    if (user.role !== "admin" && (job.publish_status !== "published" || job.status !== "ready")) {
-      return NextResponse.json({ error: "课程未发布" }, { status: 403 });
+    if (!canAccessTrainingJob(user, job)) {
+      return NextResponse.json({ error: "无权访问该课程" }, { status: 403 });
     }
 
     const body = await request.json();

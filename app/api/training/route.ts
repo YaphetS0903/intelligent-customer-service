@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { env } from "@/lib/config";
 import {
   createTrainingJob,
+  createTrainingAuditEvent,
   getCurrentUser,
   listTrainingJobs,
   listTrainingProgress,
@@ -13,6 +14,7 @@ import { loadTrainingListSnapshot, mergeTrainingListSnapshot, setTrainingListSna
 import { reconcileStaleTrainingAudioJobs } from "@/lib/training-audio-job";
 import { reconcileStaleSlideVideoJobs } from "@/lib/training-video-job";
 import { createSupabaseAdminClient } from "@/lib/supabase/server";
+import { canAccessTrainingJob } from "@/lib/training-access";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -34,7 +36,7 @@ export async function GET() {
     );
     const visibleTrainingJobs = user.role === "admin"
       ? trainingJobs
-      : trainingJobs.filter((job) => job.publish_status === "published" && job.status === "ready");
+      : trainingJobs.filter((job) => canAccessTrainingJob(user, job));
     const trainingProgress = user.role === "admin"
       ? allProgress
       : allProgress.filter((item) =>
@@ -80,6 +82,11 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const file = formData.get("file");
     const title = String(formData.get("title") ?? "").trim();
+    const description = String(formData.get("description") ?? "").trim();
+    const instructor = String(formData.get("instructor") ?? "").trim();
+    const coverUrl = String(formData.get("cover_url") ?? "").trim();
+    const visibleDepartments = String(formData.get("visible_departments") ?? "")
+      .split(",").map((item) => item.trim()).filter(Boolean);
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "请上传 PPTX 文件" }, { status: 400 });
@@ -104,6 +111,10 @@ export async function POST(request: Request) {
     });
     const trainingJob = await createTrainingJob({
       title: courseTitle,
+      description,
+      instructor,
+      cover_url: coverUrl || null,
+      visible_departments: visibleDepartments,
       ppt_file_name: file.name,
       ppt_storage_path: storagePath,
       script_json: [],
@@ -113,6 +124,14 @@ export async function POST(request: Request) {
       published_by: null,
       published_at: null,
       created_by: user.id
+    });
+
+    await createTrainingAuditEvent({
+      training_job_id: trainingJob.id,
+      actor_id: user.id,
+      action: "created",
+      detail: "创建培训课程",
+      metadata: { title: courseTitle, visible_departments: visibleDepartments }
     });
 
     await mergeTrainingListSnapshot({ trainingJob });

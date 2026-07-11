@@ -3,6 +3,7 @@ import path from "path";
 import { NextResponse } from "next/server";
 import { getCurrentUser, getTrainingJob } from "@/lib/db";
 import { createSupabaseAdminClient } from "@/lib/supabase/server";
+import { canAccessTrainingJob } from "@/lib/training-access";
 
 export const runtime = "nodejs";
 
@@ -17,8 +18,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: "培训任务不存在" }, { status: 404 });
     }
 
-    if (user.role !== "admin" && (job.publish_status !== "published" || job.status !== "ready")) {
-      return NextResponse.json({ error: "课程未发布" }, { status: 403 });
+    if (!canAccessTrainingJob(user, job)) {
+      return NextResponse.json({ error: "无权访问该课程" }, { status: 403 });
     }
 
     const slide = job.script_json[pageIndex];

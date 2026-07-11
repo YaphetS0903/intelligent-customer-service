@@ -238,9 +238,27 @@ SUPABASE_ADMIN_EMAILS=admin@company.com,hr@company.com
 -- supabase/migrations/20260704_training_slide_notes.sql
 -- supabase/migrations/20260705_position_acl.sql
 -- supabase/migrations/20260705_training_publish_status.sql
+-- supabase/migrations/20260712_training_learning_loop.sql
 ```
 
-用于升级 `training_jobs` 表结构、语音缓存字段、旧课程的备注字段、课程发布状态，以及岗位权限和单文档 ACL 字段。
+用于升级 `training_jobs` 表结构、语音缓存字段、旧课程的备注字段、课程发布状态、岗位权限、单文档 ACL，以及课程资料、部门可见范围、可信学习进度和培训审计字段。
+
+使用 MySQL 的已有环境需要执行：
+
+```bash
+MYSQL_PWD="$MYSQL_PASSWORD" mysql \
+  --host="$MYSQL_HOST" \
+  --port="${MYSQL_PORT:-3306}" \
+  --user="$MYSQL_USER" \
+  "$MYSQL_DATABASE" < scripts/migrations/20260712_training_learning_loop.mysql.sql
+```
+
+本次培训闭环迁移同时提供 MySQL 和 Supabase 回滚文件。回滚会删除新增的课程资料、学习计时和培训审计字段，执行前必须先备份数据库：
+
+```text
+scripts/migrations/20260712_training_learning_loop.mysql.rollback.sql
+scripts/migrations/20260712_training_learning_loop.supabase.rollback.sql
+```
 
 ## OpenAI 初始化
 
@@ -483,16 +501,36 @@ OCR_HEADERS={"X-Client":"tianrui","X-Request-Source":"training"}
 5. 上传一个 PPTX 生成讲稿与 TTS 语音课程。
 6. 如启用数字人，在 `/admin/training` 提交视频任务，并在 `/training/[id]` 验证视频播放。
 
-## PPT 语音讲解
+## 企业培训闭环
 
-1. 管理员进入 `/admin/training`。
-2. 上传 `.pptx` 文件。
-3. 系统解析每页文本并生成逐页讲稿。
-4. 新课程默认未发布，管理员确认讲稿后点击发布，员工才可在 `/training` 查看课程。
-5. 进入课程详情页后，可以按页查看讲稿并点击“播放语音”。
-6. 第一次播放某页时会优先调用 TTS 生成音频；如果配置了 Supabase Storage，音频会缓存到 `documents/training-audio/`，后续播放优先读取缓存。未配置或调用失败时，页面会退回浏览器本地朗读，并继续记录学习进度。
-7. 员工学习会记录进度和完课率，完成后可提交课程测验。
-8. 如果已配置数字人 API，管理员可在课程列表中生成数字人视频，员工进入课程详情页后可直接播放。
+### 课程管理
+
+1. 管理员进入 `/admin/training` 上传 `.pptx`，系统解析每页文本和演讲者备注并生成逐页讲稿。
+2. 为课程维护标题、简介、讲师、封面 URL 和可见部门；可见部门留空时对全部员工可见，管理员始终可访问。
+3. 新课程默认为未发布。标题、简介、讲师或讲稿不完整时不能发布；发布后授权员工可在 `/training` 查看，下架后立即停止员工访问。
+4. 管理端支持批量预生成课程语音，显示总页数、成功数、失败数、当前页和错误信息；失败后可重新生成，单页也可试听并按需生成。
+5. 课程资料修改、发布、下架、归档和语音重新生成会写入培训审计时间线。
+
+### 语音缓存
+
+- 第一次播放某页时调用当前 TTS 服务并写入缓存；配置 Supabase Storage 时保存到 `documents/training-audio/`，其他部署保存到 `public/generated/training-audio/`。
+- 缓存路径写入课程 `audio_paths`，后续播放优先读取缓存，不重复调用 MeloTTS；响应头 `X-Audio-Cache` 会标记 `hit` 或 `miss`。
+- 未配置或调用失败时，员工页面会退回浏览器内置语音朗读，但浏览器朗读不会写入服务端音频缓存。
+
+### 员工学习与可信进度
+
+- 员工可以逐页播放、自动连播，并选择 `0.75x`、`1x`、`1.25x`、`1.5x` 或 `2x` 倍速。
+- 系统保存当前页、播放位置、各页有效收听时长、累计真实学习时长和最后学习时间；刷新页面或重新登录后可断点续播。
+- 播放期间每 5 秒发送学习心跳。服务端限制心跳频率和单次增量，并分别计算音频消费进度和真实学习时长。
+- 每页有效收听达到该页估算音频时长约 80% 后才计为完成；仅翻页或拖动到结尾不会直接完成课程。全部页面完成后记录完课时间。
+
+### 管理统计与权限
+
+- 管理员可按课程、部门和员工关键词查询学习状态、进度、真实学习时长、最后学习时间和完课时间，并导出 CSV。
+- 课程完课率以该课程实际可见员工为分母；部门受限课程不会把无权访问的员工计入应学人数。
+- 员工课程列表、详情、音频、课件图片、测验、视频状态、视频文件和学习进度接口统一检查课程可见范围，越权请求返回 `403`。
+
+如果已配置数字人 API，管理员仍可在课程列表中生成数字人视频，员工进入课程详情页后可直接播放。考试题库、证书、学习提醒和真正的数字人生成服务不属于当前培训闭环。
 
 当前 PPT 能力聚焦文字型 PPT，并会尝试解析 `ppt/notesSlides` 中的演讲者备注。复杂图表、图片中的文字和动画暂不解析。后续可以继续接入 OCR 和页面截图增强视觉理解。
 

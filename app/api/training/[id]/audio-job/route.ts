@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   createTrainingVideoJob,
+  createTrainingAuditEvent,
   getTrainingJob,
   listTrainingVideoJobs,
   requireAdmin
@@ -58,6 +59,13 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       script_summary: trainingJob.script_json.map((slide) => slide.script).join("\n\n").slice(0, 4000),
       metadata: buildInitialTrainingAudioMetadata(trainingJob),
       created_by: user.id
+    });
+    await createTrainingAuditEvent({
+      training_job_id: id,
+      actor_id: user.id,
+      action: "audio_regenerated",
+      detail: "提交课程语音批量生成任务",
+      metadata: { audio_job_id: audioJob.id, total_pages: trainingJob.script_json.length }
     });
 
     await mergeTrainingListSnapshot({ trainingJob, videoJob: audioJob });

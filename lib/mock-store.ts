@@ -18,6 +18,7 @@ import type {
   ServiceTicket,
   ServiceTicketComment,
   TrainingJob,
+  TrainingAuditEvent,
   TrainingProgress,
   TrainingQuizAttempt,
   TrainingVideoJob,
@@ -61,6 +62,7 @@ type MemoryStore = {
   trainingVideoJobs: TrainingVideoJob[];
   trainingProgress: TrainingProgress[];
   trainingQuizAttempts: TrainingQuizAttempt[];
+  trainingAuditEvents: TrainingAuditEvent[];
 };
 
 declare global {
@@ -123,7 +125,8 @@ export const memoryStore: MemoryStore = globalThis.__enterpriseAiSupportMemorySt
   trainingJobs: [],
   trainingVideoJobs: [],
   trainingProgress: [],
-  trainingQuizAttempts: []
+  trainingQuizAttempts: [],
+  trainingAuditEvents: []
 };
 
 globalThis.__enterpriseAiSupportMemoryStore = memoryStore;

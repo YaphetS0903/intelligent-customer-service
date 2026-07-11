@@ -12,6 +12,7 @@ import {
   Loader2,
   Pause,
   PlayCircle,
+  Gauge,
   Video,
   Volume2
 } from "lucide-react";
@@ -39,6 +40,7 @@ export function TrainingPlayer({ job }: { job: TrainingJob }) {
   const [loadingAudio, setLoadingAudio] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [autoPlaying, setAutoPlaying] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState(1);
   const [audioStatus, setAudioStatus] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -46,6 +48,7 @@ export function TrainingPlayer({ job }: { job: TrainingJob }) {
   const browserSpeechPageRef = useRef<number | null>(null);
   const autoPlayRef = useRef(false);
   const completedPagesRef = useRef<number[]>([]);
+  const resumePositionRef = useRef(0);
 
   const slide = job.script_json[pageIndex];
   const canPrev = pageIndex > 0;
@@ -98,6 +101,14 @@ export function TrainingPlayer({ job }: { job: TrainingJob }) {
   }, [completedPages]);
 
   useEffect(() => {
+    if (!playing) return;
+    const timer = window.setInterval(() => {
+      void saveProgress(pageIndex, 5 * playbackRate, 5, audioRef.current?.currentTime ?? 0);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [pageIndex, playbackRate, playing]);
+
+  useEffect(() => {
     return () => {
       audioRef.current?.pause();
       stopBrowserSpeech();
@@ -122,6 +133,7 @@ export function TrainingPlayer({ job }: { job: TrainingJob }) {
       setProgressRecord(progressData.progress);
       setCompletedPages(progressData.progress.completed_pages ?? []);
       setPageIndex(Math.min(progressData.progress.current_page ?? 0, Math.max(job.script_json.length - 1, 0)));
+      resumePositionRef.current = Number(progressData.progress.playback_position_seconds ?? 0);
     }
 
     if (quizResponse.ok) {
@@ -134,27 +146,30 @@ export function TrainingPlayer({ job }: { job: TrainingJob }) {
     }
   }
 
-  async function saveProgress(nextPageIndex: number, nextCompletedPages: number[]) {
+  async function saveProgress(nextPageIndex: number, consumedSecondsDelta = 0, activeSecondsDelta = 0, playbackPositionSeconds = 0) {
     const response = await fetch(`/api/training/${job.id}/progress`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         current_page: nextPageIndex,
-        completed_pages: nextCompletedPages
+        consumed_seconds_delta: consumedSecondsDelta,
+        active_seconds_delta: activeSecondsDelta,
+        playback_position_seconds: playbackPositionSeconds
       })
     });
     const data = await response.json();
 
     if (response.ok) {
       setProgressRecord(data.progress);
+      setCompletedPages(data.progress.completed_pages ?? []);
+      completedPagesRef.current = data.progress.completed_pages ?? [];
     }
   }
 
-  function mergedCompletedPages(index: number) {
-    return [...new Set([...completedPagesRef.current, index])].sort((a, b) => a - b);
-  }
-
   function stopPlayback() {
+    if (audioRef.current && !audioRef.current.paused) {
+      void saveProgress(pageIndex, 0, 0, audioRef.current.currentTime);
+    }
     audioRef.current?.pause();
     stopBrowserSpeech();
     autoPlayRef.current = false;
@@ -164,29 +179,22 @@ export function TrainingPlayer({ job }: { job: TrainingJob }) {
     setLoadingAudio(false);
   }
 
-  function markPageCompleted(index: number) {
-    const nextCompletedPages = mergedCompletedPages(index);
-    completedPagesRef.current = nextCompletedPages;
-    setCompletedPages(nextCompletedPages);
-    return nextCompletedPages;
-  }
-
   function handleSlideEnded(index: number, continueDeck: boolean) {
     setPlaying(false);
     browserSpeechPageRef.current = null;
-    const nextCompletedPages = markPageCompleted(index);
     const nextIndex = index + 1;
 
     if (continueDeck && autoPlayRef.current && nextIndex < job.script_json.length) {
       setPageIndex(nextIndex);
-      void saveProgress(nextIndex, nextCompletedPages);
+      resumePositionRef.current = 0;
+      void saveProgress(index, 3 * playbackRate, 3, audioRef.current?.duration ?? 0);
       void playSlideAt(nextIndex, true);
       return;
     }
 
     autoPlayRef.current = false;
     setAutoPlaying(false);
-    void saveProgress(index, nextCompletedPages);
+    void saveProgress(index, 3 * playbackRate, 3, audioRef.current?.duration ?? 0);
   }
 
   async function playSlideAt(index: number, continueDeck = false) {
@@ -223,6 +231,13 @@ export function TrainingPlayer({ job }: { job: TrainingJob }) {
 
       audioRef.current?.pause();
       audioRef.current = new Audio(url);
+      audioRef.current.playbackRate = playbackRate;
+      audioRef.current.onloadedmetadata = () => {
+        if (resumePositionRef.current > 0 && resumePositionRef.current < (audioRef.current?.duration ?? 0) - 1) {
+          audioRef.current!.currentTime = resumePositionRef.current;
+        }
+        resumePositionRef.current = 0;
+      };
       audioRef.current.onended = () => {
         handleSlideEnded(index, continueDeck);
       };
@@ -288,8 +303,8 @@ export function TrainingPlayer({ job }: { job: TrainingJob }) {
     stopPlayback();
     setAudioStatus(null);
     setAudioError(null);
-    const nextCompletedPages = markPageCompleted(pageIndex);
-    void saveProgress(nextIndex, nextCompletedPages);
+    resumePositionRef.current = 0;
+    void saveProgress(nextIndex, 0, 0, 0);
     setPageIndex(nextIndex);
   }
 
@@ -342,6 +357,22 @@ export function TrainingPlayer({ job }: { job: TrainingJob }) {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <label className="inline-flex h-11 items-center gap-2 rounded-lg border border-line bg-white px-3 text-sm text-slate-700">
+              <Gauge size={17} />
+              <span className="sr-only">播放速度</span>
+              <select
+                aria-label="播放速度"
+                value={playbackRate}
+                onChange={(event) => {
+                  const nextRate = Number(event.target.value);
+                  setPlaybackRate(nextRate);
+                  if (audioRef.current) audioRef.current.playbackRate = nextRate;
+                }}
+                className="bg-transparent outline-none"
+              >
+                {[0.75, 1, 1.25, 1.5, 2].map((rate) => <option key={rate} value={rate}>{rate}x</option>)}
+              </select>
+            </label>
             <button
               type="button"
               onClick={() => void playCurrentSlide()}
@@ -538,10 +569,11 @@ export function TrainingPlayer({ job }: { job: TrainingJob }) {
             <OverviewMetric label="语音页" value={cachedAudioPages} />
             <OverviewMetric label="当前页" value={pageIndex + 1} />
             <OverviewMetric label="完课率" value={`${learningProgress}%`} />
+            <OverviewMetric label="学习时长" value={formatLearningTime(progressRecord?.total_learning_seconds ?? 0)} />
             <OverviewMetric label="视频" value={latestVideo?.status === "ready" ? "可播放" : latestVideo ? "生成中" : "未生成"} />
           </div>
           <div className="mt-4 rounded-lg border border-cyan/20 bg-cyan/10 px-3 py-2 text-xs leading-5 text-steel">
-            已学习 {completedPages.length} / {job.script_json.length} 页。首次播放某页会优先调用 TTS，失败时使用浏览器朗读。
+            已学习 {completedPages.length} / {job.script_json.length} 页。每页有效收听达到约 80% 后计为完成，拖动或仅翻页不会直接完课。
           </div>
           {progressRecord?.completed_at && (
             <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-700">
@@ -700,4 +732,11 @@ function numberFromMetadata(value: unknown) {
   }
 
   return 0;
+}
+
+function formatLearningTime(seconds: number) {
+  const totalMinutes = Math.floor(seconds / 60);
+  if (totalMinutes < 1) return `${Math.max(0, Math.round(seconds))} 秒`;
+  if (totalMinutes < 60) return `${totalMinutes} 分钟`;
+  return `${Math.floor(totalMinutes / 60)} 小时 ${totalMinutes % 60} 分`;
 }

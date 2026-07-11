@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { deleteTrainingJob, getCurrentUser, getTrainingJob, listTrainingVideoJobs, requireAdmin, updateTrainingJob } from "@/lib/db";
+import { createTrainingAuditEvent, deleteTrainingJob, getCurrentUser, getTrainingJob, listTrainingVideoJobs, requireAdmin, updateTrainingJob } from "@/lib/db";
 import { cleanupTrainingJobFiles } from "@/lib/training-file-cleanup";
+import { canAccessTrainingJob, validateTrainingPublish } from "@/lib/training-access";
 
 function normalizeAction(value: unknown) {
   if (value === "publish" || value === "unpublish" || value === "archive") {
@@ -20,8 +21,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: "培训任务不存在" }, { status: 404 });
     }
 
-    if (user.role !== "admin" && (trainingJob.publish_status !== "published" || trainingJob.status !== "ready")) {
-      return NextResponse.json({ error: "课程未发布" }, { status: 403 });
+    if (!canAccessTrainingJob(user, trainingJob)) {
+      return NextResponse.json({ error: "无权访问该课程" }, { status: 403 });
     }
 
     return NextResponse.json({ trainingJob });
@@ -45,12 +46,33 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ error: "培训任务不存在" }, { status: 404 });
     }
 
-    if (!action) {
-      return NextResponse.json({ error: "课程发布动作不正确" }, { status: 400 });
+    if (!action && body.action !== "update") {
+      return NextResponse.json({ error: "课程操作不正确" }, { status: 400 });
     }
 
-    if (action === "publish" && trainingJob.status !== "ready") {
-      return NextResponse.json({ error: "课程讲稿未生成完成，暂不能发布" }, { status: 400 });
+    if (body.action === "update") {
+      const updated = await updateTrainingJob(id, {
+        title: String(body.title ?? trainingJob.title).trim(),
+        description: String(body.description ?? trainingJob.description).trim(),
+        instructor: String(body.instructor ?? trainingJob.instructor).trim(),
+        cover_url: String(body.cover_url ?? "").trim() || null,
+        visible_departments: Array.isArray(body.visible_departments)
+          ? [...new Set<string>((body.visible_departments as unknown[]).map((item) => String(item).trim()).filter(Boolean))]
+          : trainingJob.visible_departments
+      });
+      await createTrainingAuditEvent({
+        training_job_id: id,
+        actor_id: user.id,
+        action: "updated",
+        detail: "更新课程资料与可见范围",
+        metadata: { visible_departments: updated.visible_departments }
+      });
+      return NextResponse.json({ trainingJob: updated });
+    }
+
+    if (action === "publish") {
+      const validationError = validateTrainingPublish(trainingJob);
+      if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
     }
 
     const next = action === "publish"
@@ -65,6 +87,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           published_at: null
         };
     const updated = await updateTrainingJob(id, next);
+    await createTrainingAuditEvent({
+      training_job_id: id,
+      actor_id: user.id,
+      action: action === "publish" ? "published" : action === "archive" ? "archived" : "unpublished",
+      detail: action === "publish" ? "发布课程" : "下架课程",
+      metadata: {}
+    });
 
     return NextResponse.json({ trainingJob: updated });
   } catch (error) {

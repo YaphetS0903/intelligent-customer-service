@@ -246,6 +246,10 @@ create table if not exists public.notifications (
 create table if not exists public.training_jobs (
   id text primary key,
   title text not null,
+  description text not null default '',
+  instructor text not null default '',
+  cover_url text,
+  visible_departments text[] not null default '{}',
   ppt_file_name text not null,
   ppt_storage_path text,
   script_json jsonb not null default '[]'::jsonb,
@@ -255,6 +259,33 @@ create table if not exists public.training_jobs (
   published_by text,
   published_at timestamptz,
   created_by text,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.training_progress (
+  id text primary key,
+  training_job_id text not null references public.training_jobs(id) on delete cascade,
+  user_id text not null,
+  completed_pages integer[] not null default '{}',
+  current_page integer not null default 0,
+  progress_percent integer not null default 0,
+  page_learning_seconds jsonb not null default '{}'::jsonb,
+  total_learning_seconds integer not null default 0,
+  playback_position_seconds numeric(12,3) not null default 0,
+  last_active_at timestamptz,
+  completed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (training_job_id, user_id)
+);
+
+create table if not exists public.training_audit_events (
+  id text primary key,
+  training_job_id text not null references public.training_jobs(id) on delete cascade,
+  actor_id text not null,
+  action text not null check (action in ('created', 'updated', 'published', 'unpublished', 'archived', 'audio_regenerated')),
+  detail text not null,
+  metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
 
@@ -300,6 +331,10 @@ create index if not exists conversations_pinned_at_idx on public.conversations(p
 create index if not exists messages_conversation_id_idx on public.messages(conversation_id);
 create index if not exists feedback_message_id_idx on public.feedback(message_id);
 create index if not exists training_jobs_created_at_idx on public.training_jobs(created_at);
+create index if not exists training_progress_job_idx on public.training_progress(training_job_id);
+create index if not exists training_progress_user_idx on public.training_progress(user_id);
+create index if not exists training_audit_events_job_idx on public.training_audit_events(training_job_id, created_at desc);
+create index if not exists training_audit_events_actor_idx on public.training_audit_events(actor_id, created_at desc);
 create index if not exists training_video_jobs_training_job_idx on public.training_video_jobs(training_job_id);
 create index if not exists training_video_jobs_status_idx on public.training_video_jobs(status);
 create index if not exists training_video_jobs_updated_at_idx on public.training_video_jobs(updated_at);

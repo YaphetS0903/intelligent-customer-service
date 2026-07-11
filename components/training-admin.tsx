@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Archive, CheckCircle2, CircleAlert, Clock, Eye, EyeOff, FileAudio, Film, Loader2, Play, Trash2, Trophy, Upload, UserCheck, UserX, Video } from "lucide-react";
+import { Archive, CheckCircle2, CircleAlert, Clock, Download, Eye, EyeOff, FileAudio, Film, Loader2, Play, Save, Trash2, Trophy, Upload, UserCheck, UserX, Video } from "lucide-react";
 import { StatusPill } from "@/components/status-pill";
 import { ActionConfirmDialog, ErrorRetry, PanelSkeleton, useToast, type ActionConfirmRequest } from "@/components/ui-feedback";
-import type { TrainingJob, TrainingProgress, TrainingQuizAttempt, TrainingVideoJob, UserProfile } from "@/lib/types";
+import type { TrainingAuditEvent, TrainingJob, TrainingProgress, TrainingQuizAttempt, TrainingVideoJob, UserProfile } from "@/lib/types";
 
 type LearnerReportRow = {
   user: UserProfile;
@@ -24,8 +24,15 @@ export function TrainingAdmin() {
   const [progress, setProgress] = useState<TrainingProgress[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [quizAttempts, setQuizAttempts] = useState<TrainingQuizAttempt[]>([]);
+  const [auditEvents, setAuditEvents] = useState<TrainingAuditEvent[]>([]);
   const [selectedJobId, setSelectedJobId] = useState("");
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [instructor, setInstructor] = useState("");
+  const [coverUrl, setCoverUrl] = useState("");
+  const [visibleDepartments, setVisibleDepartments] = useState("");
+  const [departmentFilter, setDepartmentFilter] = useState("");
+  const [learnerSearch, setLearnerSearch] = useState("");
   const [initialLoading, setInitialLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -78,6 +85,7 @@ export function TrainingAdmin() {
     setProgress(data.trainingProgress ?? []);
     setUsers(data.users ?? []);
     setQuizAttempts(data.quizAttempts ?? []);
+    setAuditEvents(data.auditEvents ?? []);
     setLoadError(null);
     setSelectedJobId((current) =>
       current && nextJobs.some((job: TrainingJob) => job.id === current) ? current : nextJobs[0]?.id ?? ""
@@ -125,7 +133,7 @@ export function TrainingAdmin() {
     [jobs, selectedJobId]
   );
   const learnerRows = useMemo(
-    () => selectedJob ? buildLearnerRows(selectedJob, activeLearners, progress, quizAttempts) : [],
+    () => selectedJob ? buildLearnerRows(selectedJob, visibleLearners(selectedJob, activeLearners), progress, quizAttempts) : [],
     [activeLearners, progress, quizAttempts, selectedJob]
   );
   const stats = useMemo(() => {
@@ -172,6 +180,10 @@ export function TrainingAdmin() {
       if (title.trim()) {
         formData.set("title", title.trim());
       }
+      formData.set("description", description.trim());
+      formData.set("instructor", instructor.trim());
+      formData.set("cover_url", coverUrl.trim());
+      formData.set("visible_departments", visibleDepartments.trim());
 
       const response = await fetch("/api/training", {
         method: "POST",
@@ -184,6 +196,10 @@ export function TrainingAdmin() {
       }
 
       setTitle("");
+      setDescription("");
+      setInstructor("");
+      setCoverUrl("");
+      setVisibleDepartments("");
       await loadJobs();
       if (data.trainingJob) {
         setJobs((current) => upsertById(current, data.trainingJob));
@@ -228,6 +244,51 @@ export function TrainingAdmin() {
     } finally {
       setVideoLoadingId(null);
     }
+  }
+
+  async function saveCourseMetadata(job: TrainingJob, formData: FormData) {
+    setPublishingId(job.id);
+    try {
+      const response = await fetch(`/api/training/${job.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update",
+          title: String(formData.get("title") ?? ""),
+          description: String(formData.get("description") ?? ""),
+          instructor: String(formData.get("instructor") ?? ""),
+          cover_url: String(formData.get("cover_url") ?? ""),
+          visible_departments: String(formData.get("visible_departments") ?? "").split(",").map((item) => item.trim()).filter(Boolean)
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "保存课程资料失败");
+      setJobs((current) => upsertById(current, data.trainingJob));
+      pushToast({ tone: "success", title: "课程资料已保存" });
+    } catch (error) {
+      showError(error, "保存课程资料失败");
+    } finally {
+      setPublishingId(null);
+    }
+  }
+
+  function exportLearningReport() {
+    if (!selectedJob) return;
+    const rows = learnerRows.filter((row) => !departmentFilter || row.user.department === departmentFilter);
+    const csv = [
+      ["课程", "员工", "邮箱", "部门", "岗位", "状态", "进度", "学习时长(秒)", "最后学习时间", "完课时间"],
+      ...rows.map((row) => [
+        selectedJob.title, row.user.name, row.user.email, row.user.department, row.user.position,
+        learnerStatusLabel(row.status), row.progress?.progress_percent ?? 0,
+        row.progress?.total_learning_seconds ?? 0, row.progress?.last_active_at ?? "", row.progress?.completed_at ?? ""
+      ])
+    ].map((row) => row.map(csvCell).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${selectedJob.title}-学习记录.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
   }
 
   async function generateTrainingAudio(jobId: string) {
@@ -306,7 +367,7 @@ export function TrainingAdmin() {
       await loadJobs();
       pushToast({
         tone: "success",
-        title: action === "publish" ? "课程已发布" : action === "archive" ? "课程已归档" : "课程已下架",
+        title: action === "publish" ? "课程已发布" : "课程已下架",
         description: action === "publish" ? "员工可进入培训列表学习。" : "员工端不再展示。"
       });
     } catch (error) {
@@ -320,7 +381,7 @@ export function TrainingAdmin() {
     if (job.publish_status === "published") {
       pushToast({
         tone: "warning",
-        title: "请先归档课程",
+        title: "请先下架课程",
         description: "已发布课程不能直接删除。"
       });
       return;
@@ -468,8 +529,8 @@ export function TrainingAdmin() {
             onClick={() => void updateCoursePublishStatus(job.id, "archive")}
             disabled={publishingId === job.id}
             className={dangerButtonClass}
-            title="归档课程"
-            aria-label="归档课程"
+            title="下架课程"
+            aria-label="下架课程"
           >
             {publishingId === job.id ? <Loader2 className="animate-spin" size={16} /> : <Archive size={16} />}
             <span className={labelClass}>归档</span>
@@ -524,7 +585,7 @@ export function TrainingAdmin() {
               上传后进入后台生成逐页讲稿和课件画面；生成完成后可预览语音讲解并合成课件视频。
             </p>
             <form
-              className="mt-4 grid gap-3 lg:grid-cols-[260px_1fr_160px]"
+              className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4"
               onSubmit={(event) => {
                 event.preventDefault();
                 void createTraining(new FormData(event.currentTarget));
@@ -537,6 +598,10 @@ export function TrainingAdmin() {
                 placeholder="课程标题，可选"
                 className="h-11 rounded-lg border border-line px-3 text-sm outline-none focus:border-brand"
               />
+              <input value={instructor} onChange={(event) => setInstructor(event.target.value)} placeholder="讲师或负责部门" className="h-11 rounded-lg border border-line px-3 text-sm outline-none focus:border-brand" />
+              <input value={coverUrl} onChange={(event) => setCoverUrl(event.target.value)} placeholder="封面图片地址，可选" className="h-11 rounded-lg border border-line px-3 text-sm outline-none focus:border-brand" />
+              <input value={visibleDepartments} onChange={(event) => setVisibleDepartments(event.target.value)} placeholder="可见部门，逗号分隔；留空为全员" className="h-11 rounded-lg border border-line px-3 text-sm outline-none focus:border-brand" />
+              <textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="课程简介" className="min-h-20 rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-brand md:col-span-2 xl:col-span-3" />
               <input
                 name="file"
                 type="file"
@@ -557,13 +622,47 @@ export function TrainingAdmin() {
             </div>
           </section>
 
+          {selectedJob && (
+            <section className="ui-card p-5">
+              <h2 className="text-base font-semibold text-ink">课程资料与可见范围</h2>
+              <form
+                key={`${selectedJob.id}-${selectedJob.created_at}`}
+                className="mt-4 grid gap-3 md:grid-cols-2"
+                onSubmit={(event) => { event.preventDefault(); void saveCourseMetadata(selectedJob, new FormData(event.currentTarget)); }}
+              >
+                <input name="title" defaultValue={selectedJob.title} required placeholder="课程标题" className="h-11 rounded-lg border border-line px-3 text-sm" />
+                <input name="instructor" defaultValue={selectedJob.instructor} required placeholder="讲师或负责部门" className="h-11 rounded-lg border border-line px-3 text-sm" />
+                <input name="cover_url" defaultValue={selectedJob.cover_url ?? ""} placeholder="封面图片地址" className="h-11 rounded-lg border border-line px-3 text-sm" />
+                <input name="visible_departments" defaultValue={selectedJob.visible_departments.join(", ")} placeholder="可见部门，留空为全员" className="h-11 rounded-lg border border-line px-3 text-sm" />
+                <textarea name="description" defaultValue={selectedJob.description} required placeholder="课程简介" className="min-h-24 rounded-lg border border-line px-3 py-2 text-sm md:col-span-2" />
+                <button disabled={publishingId === selectedJob.id} className="ui-button-primary h-11 md:col-span-2">
+                  {publishingId === selectedJob.id ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}保存课程资料
+                </button>
+              </form>
+            </section>
+          )}
+
           <TrainingLearnerReport
             jobs={jobs}
             selectedJob={selectedJob}
             selectedJobId={selectedJob?.id ?? selectedJobId}
             onSelectedJobChange={setSelectedJobId}
-            rows={learnerRows}
+            rows={learnerRows.filter((row) => {
+              const matchesDepartment = !departmentFilter || row.user.department === departmentFilter;
+              const keyword = learnerSearch.trim().toLowerCase();
+              return matchesDepartment && (!keyword || [row.user.name, row.user.email, row.user.position].some((value) => value.toLowerCase().includes(keyword)));
+            })}
+            departmentFilter={departmentFilter}
+            departments={[...new Set(activeLearners.map((user) => user.department).filter(Boolean))].sort()}
+            onDepartmentFilterChange={setDepartmentFilter}
+            learnerSearch={learnerSearch}
+            onLearnerSearchChange={setLearnerSearch}
+            onExport={exportLearningReport}
           />
+
+          {selectedJob && (
+            <TrainingAuditTimeline events={auditEvents.filter((event) => event.training_job_id === selectedJob.id)} users={users} />
+          )}
 
           <section className="space-y-3">
         <div className="flex flex-col gap-1 px-1 sm:flex-row sm:items-end sm:justify-between">
@@ -616,7 +715,7 @@ export function TrainingAdmin() {
                         <p>{countSlideImages(job)} 页课件画面</p>
                         <p>{job.audio_paths.filter(Boolean).length} 页已缓存语音</p>
                         <TrainingAudioStatus job={job} audioJob={latestAudioJob} />
-                        <p>{courseCompletionRate(job.id, progress, activeLearners)}% 完课率</p>
+                        <p>{courseCompletionRate(job, progress, activeLearners)}% 完课率</p>
                       </td>
                       <td className="px-4 py-3 text-xs leading-5 text-slate-500">
                         <SlideVideoStatus videoJob={latestSlideVideo} />
@@ -678,7 +777,7 @@ export function TrainingAdmin() {
                   </div>
                   <div className="rounded-lg border border-line bg-slate-50 px-3 py-2">
                     <p className="text-slate-500">完课率</p>
-                    <p className="mt-1 font-semibold text-ink">{courseCompletionRate(job.id, progress, activeLearners)}%</p>
+                    <p className="mt-1 font-semibold text-ink">{courseCompletionRate(job, progress, activeLearners)}%</p>
                   </div>
                 </div>
                 <div className="mt-3 rounded-lg border border-line bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
@@ -756,13 +855,25 @@ function TrainingLearnerReport({
   selectedJob,
   selectedJobId,
   onSelectedJobChange,
-  rows
+  rows,
+  departmentFilter,
+  departments,
+  onDepartmentFilterChange,
+  learnerSearch,
+  onLearnerSearchChange,
+  onExport
 }: {
   jobs: TrainingJob[];
   selectedJob: TrainingJob | null;
   selectedJobId: string;
   onSelectedJobChange: (jobId: string) => void;
   rows: LearnerReportRow[];
+  departmentFilter: string;
+  departments: string[];
+  onDepartmentFilterChange: (department: string) => void;
+  learnerSearch: string;
+  onLearnerSearchChange: (keyword: string) => void;
+  onExport: () => void;
 }) {
   const started = rows.filter((row) => row.progress).length;
   const completed = rows.filter((row) => row.status === "completed").length;
@@ -777,18 +888,17 @@ function TrainingLearnerReport({
           <h2 className="text-base font-semibold text-ink">学习跟踪</h2>
           <p className="mt-1 text-sm text-slate-500">按课程查看员工学习进度、完课状态与最近测验成绩。</p>
         </div>
-        <select
-          aria-label="选择课程"
-          value={selectedJobId}
-          onChange={(event) => onSelectedJobChange(event.target.value)}
-          className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm text-ink outline-none focus:border-brand sm:w-auto sm:min-w-64"
-        >
-          {jobs.map((job) => (
-            <option key={job.id} value={job.id}>
-              {job.title}
-            </option>
-          ))}
-        </select>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <input aria-label="搜索员工" value={learnerSearch} onChange={(event) => onLearnerSearchChange(event.target.value)} placeholder="搜索员工" className="h-11 rounded-lg border border-line bg-white px-3 text-sm text-ink" />
+          <select aria-label="选择课程" value={selectedJobId} onChange={(event) => onSelectedJobChange(event.target.value)} className="h-11 rounded-lg border border-line bg-white px-3 text-sm text-ink outline-none focus:border-brand sm:min-w-64">
+            {jobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}
+          </select>
+          <select aria-label="筛选部门" value={departmentFilter} onChange={(event) => onDepartmentFilterChange(event.target.value)} className="h-11 rounded-lg border border-line bg-white px-3 text-sm text-ink">
+            <option value="">全部部门</option>
+            {departments.map((department) => <option key={department} value={department}>{department}</option>)}
+          </select>
+          <button type="button" onClick={onExport} disabled={!selectedJob} className="ui-button-secondary h-11"><Download size={16} />导出</button>
+        </div>
       </div>
 
       <div className="grid gap-3 border-b border-line bg-slate-50/70 p-4 md:grid-cols-5">
@@ -862,7 +972,8 @@ function TrainingLearnerReport({
               </div>
               <div className="rounded-lg border border-line px-3 py-2">
                 <p className="font-medium text-slate-600">最近更新</p>
-                <p className="mt-1">{row.progress ? formatDateTime(row.progress.updated_at) : "-"}</p>
+                <p className="mt-1">{row.progress ? formatDateTime(row.progress.last_active_at ?? row.progress.updated_at) : "-"}</p>
+                <p>{formatLearningDuration(row.progress?.total_learning_seconds ?? 0)}</p>
               </div>
             </div>
           </article>
@@ -930,7 +1041,8 @@ function TrainingLearnerReport({
                   )}
                 </td>
                 <td className="px-4 py-3 text-xs text-slate-500">
-                  {row.progress ? formatDateTime(row.progress.updated_at) : "-"}
+                  {row.progress ? formatDateTime(row.progress.last_active_at ?? row.progress.updated_at) : "-"}
+                  {row.progress && <p className="mt-1">{formatLearningDuration(row.progress.total_learning_seconds)}</p>}
                 </td>
               </tr>
             ))}
@@ -956,6 +1068,23 @@ function TrainingLearnerReport({
           当前课程：{selectedJob.publish_status === "published" ? "已发布" : "未发布"}；最近通过测验 {passedQuiz} 人。
         </div>
       )}
+    </section>
+  );
+}
+
+function TrainingAuditTimeline({ events, users }: { events: TrainingAuditEvent[]; users: UserProfile[] }) {
+  return (
+    <section className="ui-card p-5">
+      <h2 className="text-base font-semibold text-ink">课程操作记录</h2>
+      <div className="mt-4 divide-y divide-line">
+        {events.slice(0, 20).map((event) => (
+          <div key={event.id} className="flex flex-col gap-1 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+            <div><p className="font-medium text-ink">{event.detail}</p><p className="mt-1 text-xs text-slate-500">{users.find((user) => user.id === event.actor_id)?.name ?? event.actor_id}</p></div>
+            <time className="text-xs text-slate-500">{formatDateTime(event.created_at)}</time>
+          </div>
+        ))}
+        {events.length === 0 && <p className="py-6 text-center text-sm text-slate-500">暂无操作记录，后续发布、下架和语音生成会在这里留痕。</p>}
+      </div>
     </section>
   );
 }
@@ -1099,14 +1228,21 @@ function isActiveEmployee(user: UserProfile) {
   return user.role === "employee" && user.status === "active";
 }
 
-function courseCompletionRate(jobId: string, progress: TrainingProgress[], learners: UserProfile[]) {
-  if (learners.length === 0) {
+function courseCompletionRate(job: TrainingJob, progress: TrainingProgress[], learners: UserProfile[]) {
+  const targetLearners = visibleLearners(job, learners);
+  if (targetLearners.length === 0) {
     return 0;
   }
 
-  const related = progress.filter((item) => item.training_job_id === jobId);
+  const related = progress.filter((item) => item.training_job_id === job.id);
 
-  return Math.round((related.filter((item) => item.progress_percent >= 100).length / learners.length) * 100);
+  return Math.round((related.filter((item) => item.progress_percent >= 100 && targetLearners.some((user) => user.id === item.user_id)).length / targetLearners.length) * 100);
+}
+
+function visibleLearners(job: TrainingJob, learners: UserProfile[]) {
+  return job.visible_departments.length === 0
+    ? learners
+    : learners.filter((user) => job.visible_departments.includes(user.department));
 }
 
 function learnerStatusLabel(status: LearnerReportRow["status"]) {
@@ -1333,11 +1469,20 @@ function numberFromMetadata(value: unknown) {
   return 0;
 }
 
+function csvCell(value: unknown) {
+  return `"${String(value ?? "").replace(/"/g, '""')}"`;
+}
+
+function formatLearningDuration(seconds: number) {
+  const minutes = Math.floor(seconds / 60);
+  return minutes < 1 ? `${Math.round(seconds)} 秒` : `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分`;
+}
+
 function trainingPublishLabel(status: TrainingJob["publish_status"]) {
   const labels: Record<TrainingJob["publish_status"], string> = {
     draft: "未发布",
     published: "已发布",
-    archived: "已归档"
+    archived: "已下架"
   };
 
   return labels[status];

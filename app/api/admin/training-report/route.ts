@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   listAllTrainingQuizAttempts,
   listTrainingJobs,
+  listTrainingAuditEvents,
   listTrainingProgress,
   listTrainingVideoJobs,
   listUsers,
@@ -19,12 +20,13 @@ export async function GET() {
   try {
     await requireAdmin();
     const cached = await loadTrainingListSnapshot();
-    const [trainingJobs, trainingProgress, videoJobs, users, quizAttempts] = await Promise.all([
+    const [trainingJobs, trainingProgress, videoJobs, users, quizAttempts, auditEvents] = await Promise.all([
       withFallback(listTrainingJobs(), cached?.trainingJobs ?? [], 8000, "list training jobs"),
       withFallback(listTrainingProgress(), cached?.trainingProgress ?? [], 2500, "list training progress"),
       withFallback(listTrainingVideoJobs(), cached?.videoJobs ?? [], 2500, "list training video jobs"),
       withFallback(listUsers(), [], 2500, "list users"),
-      withFallback(listAllTrainingQuizAttempts(), [], 2500, "list quiz attempts")
+      withFallback(listAllTrainingQuizAttempts(), [], 2500, "list quiz attempts"),
+      withFallback(listTrainingAuditEvents(), [], 2500, "list training audit events")
     ]);
 
     for (const trainingJob of trainingJobs) {
@@ -56,7 +58,8 @@ export async function GET() {
       trainingProgress,
       videoJobs,
       users,
-      quizAttempts
+      quizAttempts,
+      auditEvents
     });
   } catch (error) {
     return NextResponse.json(
