@@ -433,7 +433,7 @@ RAG_PROVIDER=openai_file_search
 RAG_PROVIDER=local_text
 ```
 
-使用本地文本 RAG。上传 TXT、Markdown、DOCX、PPTX、PDF、XLSX、XLS 时，系统会解析文字并写入当前数据库 `document_chunks`，员工提问时先做轻量混合召回，再把片段交给 OpenAI 或自定义 OpenAI-compatible 对话模型生成答案。召回会综合关键词、别名扩展、标题/章节/表格元数据、字符 n-gram 相似度、命中词距离和资料新鲜度，并在引用中显示相关度和命中原因。这个模式不需要 OpenAI Vector Store，适合先接 DeepSeek、智谱、讯飞、阿里等国产兼容模型做演示。
+使用本地文本 RAG。上传 TXT、Markdown、DOCX、PPTX、PDF、XLSX 时，系统会解析文字并写入当前数据库 `document_chunks`，员工提问时先做轻量混合召回，再把片段交给 OpenAI 或自定义 OpenAI-compatible 对话模型生成答案。旧版 XLS 需要先另存为 XLSX。召回会综合关键词、别名扩展、标题/章节/表格元数据、字符 n-gram 相似度、命中词距离和资料新鲜度，并在引用中显示相关度和命中原因。这个模式不需要 OpenAI Vector Store，适合先接 DeepSeek、智谱、讯飞、阿里等国产兼容模型做演示。
 
 当前 `local_text` 模式的限制：
 
@@ -604,7 +604,7 @@ NOTIFICATION_WECOM_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?
 
 ## 资料审批发布
 
-管理员上传资料后，系统会先解析文件并生成知识分片，但新资料默认保持“草稿”状态。管理员可在 `/admin/documents` 或 `/admin` 的资料列表中打开“权限治理”，完成以下流程：
+管理员上传资料后，系统会先解析文件并生成知识分片，但新资料默认保持“草稿”状态。管理员可在 `/admin/documents` 的资料列表中打开“权限治理”，完成以下流程：
 
 1. 配置资料密级、可见部门、可见岗位或指定用户。
 2. 点击“提交审核”，资料进入“待审核”。

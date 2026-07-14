@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   return NextResponse.json({
     enabled: isMySqlDatabase() && isSsoEnabled(),
-    provider: env.ssoProvider
+    provider: env.ssoProvider,
+    selfRegistrationEnabled: isMySqlDatabase() && env.allowSelfRegistration
   });
 }

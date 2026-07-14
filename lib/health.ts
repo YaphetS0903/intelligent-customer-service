@@ -138,10 +138,6 @@ const schemaTables = [
   "qa_test_cases"
 ];
 
-function envReady(...values: string[]) {
-  return values.every((value) => value.trim().length > 0);
-}
-
 function redactError(error: unknown) {
   if (error instanceof Error && error.message) {
     return error.message;

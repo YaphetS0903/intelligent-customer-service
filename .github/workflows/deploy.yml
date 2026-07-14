@@ -33,6 +33,8 @@ jobs:
       INITIAL_ADMIN_EMAIL: admin@e2e.local
       INITIAL_ADMIN_PASSWORD: ci-only-admin-password
       E2E_TEST_PASSWORD: ci-only-test-password
+      E2E_ALLOW_DATABASE_WRITE: "true"
+      ALLOW_SELF_REGISTRATION: "false"
       APP_BASE_URL: http://localhost:3100
       RAG_PROVIDER: local_text
       AI_CHAT_PROVIDER: custom

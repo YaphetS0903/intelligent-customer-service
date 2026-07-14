@@ -312,6 +312,7 @@ export type Conversation = {
   title: string;
   archived_at: string | null;
   pinned_at: string | null;
+  deleted_at: string | null;
   created_at: string;
   updated_at: string;
 };

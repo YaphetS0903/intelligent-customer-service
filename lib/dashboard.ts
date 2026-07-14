@@ -1,5 +1,6 @@
 import {
   getCurrentUser,
+  countAllMessages,
   listAllConversations,
   listDocuments,
   listFeedback,
@@ -62,12 +63,13 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     return emptyDashboardStats;
   }
 
-  const [knowledgeBases, documents, trainingJobs, allConversations, feedback] = await Promise.all([
+  const [knowledgeBases, documents, trainingJobs, allConversations, feedback, messageCount] = await Promise.all([
     withTimeout(listKnowledgeBases(), [], 1200),
     withTimeout(listDocuments(), [], 1200),
     withTimeout(listTrainingJobs(), [], 1200),
     withTimeout(listAllConversations(), [], 1200),
-    withTimeout(listFeedback(), [], 1200)
+    withTimeout(listFeedback(), [], 1200),
+    withTimeout(countAllMessages(), 0, 1200)
   ]);
 
   const conversations =
@@ -86,7 +88,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
       readyDocuments,
       trainingJobs: trainingJobs.length,
       conversations: conversations.length,
-      messages: 0,
+      messages: messageCount,
       feedback: feedback.length,
       likes,
       dislikes

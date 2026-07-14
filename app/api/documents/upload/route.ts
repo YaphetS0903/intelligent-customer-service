@@ -1,21 +1,13 @@
 import { NextResponse } from "next/server";
+import JSZip from "jszip";
 import { env, isLocalTextRag } from "@/lib/config";
 import { createDocument, createDocumentVersion, getKnowledgeBase, requireAdmin } from "@/lib/db";
-import { isImageFile } from "@/lib/document-text";
 import { startDocumentProcessingJob } from "@/lib/document-processing-job";
 import { storeDocumentSourceFile } from "@/lib/document-storage";
 import { mapVectorStoreFileStatus, uploadFileToVectorStore } from "@/lib/openai-rag";
 import { createSupabaseAdminClient } from "@/lib/supabase/server";
 
-const allowedTypes = new Set([
-  "application/pdf",
-  "text/plain",
-  "text/markdown",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-excel"
-]);
+const maxFilesPerUpload = 10;
 
 export async function POST(request: Request) {
   try {
@@ -29,6 +21,9 @@ export async function POST(request: Request) {
     if (files.length === 0) {
       return NextResponse.json({ error: "请上传文件" }, { status: 400 });
     }
+    if (files.length > maxFilesPerUpload) {
+      return NextResponse.json({ error: `单次最多上传 ${maxFilesPerUpload} 个文件` }, { status: 400 });
+    }
 
     if (!knowledgeBaseId) {
       return NextResponse.json({ error: "请选择知识库" }, { status: 400 });
@@ -39,9 +34,8 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: `文件「${file.name}」不能超过 ${env.maxUploadMb}MB` }, { status: 400 });
       }
 
-      if (!isSupportedUploadFile(file)) {
-        return NextResponse.json({ error: `文件「${file.name}」暂不支持该文件类型` }, { status: 400 });
-      }
+      const validationError = await validateUploadFile(file);
+      if (validationError) return NextResponse.json({ error: `文件「${file.name}」${validationError}` }, { status: 400 });
     }
 
     const knowledgeBase = await getKnowledgeBase(knowledgeBaseId);
@@ -88,22 +82,55 @@ export async function POST(request: Request) {
   }
 }
 
-function isSupportedUploadFile(file: File) {
-  if (file.type && allowedTypes.has(file.type)) {
-    return true;
+async function validateUploadFile(file: File) {
+  const lowerName = file.name.toLowerCase();
+  const extension = lowerName.slice(lowerName.lastIndexOf("."));
+  if (extension === ".xls") return "是旧版 XLS，请另存为 XLSX 后重新上传";
+  const supportedExtensions = new Set([".txt", ".md", ".docx", ".pptx", ".pdf", ".xlsx"]);
+  if (isLocalTextRag()) [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"].forEach((item) => supportedExtensions.add(item));
+  if (!supportedExtensions.has(extension)) return "暂不支持该文件类型";
+
+  const allowedMimeTypes: Record<string, string[]> = {
+    ".txt": ["", "text/plain", "application/octet-stream"],
+    ".md": ["", "text/markdown", "text/plain", "application/octet-stream"],
+    ".docx": ["", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/octet-stream"],
+    ".pptx": ["", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/octet-stream"],
+    ".xlsx": ["", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/octet-stream"],
+    ".pdf": ["", "application/pdf", "application/octet-stream"]
+  };
+  if (extension in allowedMimeTypes && !allowedMimeTypes[extension].includes(file.type)) {
+    return "的扩展名与 MIME 类型不一致";
   }
 
-  const lowerName = file.name.toLowerCase();
-  return (
-    lowerName.endsWith(".txt") ||
-    lowerName.endsWith(".md") ||
-    lowerName.endsWith(".docx") ||
-    lowerName.endsWith(".pptx") ||
-    lowerName.endsWith(".pdf") ||
-    lowerName.endsWith(".xlsx") ||
-    lowerName.endsWith(".xls") ||
-    (isLocalTextRag() && isImageFile(file, lowerName))
-  );
+  const header = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+  if ([".docx", ".pptx", ".xlsx"].includes(extension) && !hasBytes(header, [0x50, 0x4b])) {
+    return "不是有效的 Office Open XML 文件";
+  }
+  if ([".docx", ".pptx", ".xlsx"].includes(extension)) {
+    try {
+      const zip = await JSZip.loadAsync(await file.arrayBuffer(), { checkCRC32: false });
+      const requiredPath = ({ ".docx": "word/document.xml", ".pptx": "ppt/presentation.xml", ".xlsx": "xl/workbook.xml" })[extension];
+      if (!requiredPath || !zip.file(requiredPath)) return "缺少必要的 Office 文档结构";
+      if (Object.keys(zip.files).length > 5000) return "包含过多压缩条目";
+    } catch {
+      return "不是可解析的 Office Open XML 文件";
+    }
+  }
+  if (extension === ".pdf" && !hasBytes(header, [0x25, 0x50, 0x44, 0x46])) return "不是有效的 PDF 文件";
+  if (extension === ".png" && !hasBytes(header, [0x89, 0x50, 0x4e, 0x47])) return "不是有效的 PNG 图片";
+  if ([".jpg", ".jpeg"].includes(extension) && !hasBytes(header, [0xff, 0xd8, 0xff])) return "不是有效的 JPEG 图片";
+  if (extension === ".webp" && !(hasAscii(header, 0, "RIFF") && hasAscii(header, 8, "WEBP"))) return "不是有效的 WebP 图片";
+  if (extension === ".bmp" && !hasAscii(header, 0, "BM")) return "不是有效的 BMP 图片";
+  if ([".tif", ".tiff"].includes(extension) && !(hasAscii(header, 0, "II") || hasAscii(header, 0, "MM"))) return "不是有效的 TIFF 图片";
+  return null;
+}
+
+function hasBytes(buffer: Uint8Array, expected: number[]) {
+  return expected.every((value, index) => buffer[index] === value);
+}
+
+function hasAscii(buffer: Uint8Array, offset: number, expected: string) {
+  return [...expected].every((value, index) => buffer[offset + index] === value.charCodeAt(0));
 }
 
 async function uploadOneFile(input: {

@@ -1896,7 +1896,7 @@ export function AdminDashboard() {
             <input
               name="file"
               type="file"
-              accept=".pdf,.txt,.md,.docx,.pptx,.xlsx,.xls,image/*"
+              accept=".pdf,.txt,.md,.docx,.pptx,.xlsx,image/*"
               multiple
               className="min-w-0 rounded-lg border border-line px-3 py-2 text-sm"
               required

@@ -236,6 +236,9 @@ export const env = {
   get appBaseUrl() {
     return process.env.APP_BASE_URL ?? "http://localhost:3000";
   },
+  get allowSelfRegistration() {
+    return process.env.ALLOW_SELF_REGISTRATION === "true";
+  },
   get notificationWebhookUrl() {
     return process.env.NOTIFICATION_WEBHOOK_URL ?? "";
   },

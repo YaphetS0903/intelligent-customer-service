@@ -83,6 +83,39 @@ export async function mysqlExecute(sql: string, params?: Record<string, unknown>
   });
 }
 
+export async function mysqlTransaction<T>(
+  operation: (transaction: {
+    query<R = any>(sql: string, params?: Record<string, unknown> | unknown[]): Promise<R>;
+    execute(sql: string, params?: Record<string, unknown> | unknown[]): Promise<unknown>;
+  }) => Promise<T>
+) {
+  await ensureMySqlSchema();
+  const db = getMySqlPool();
+  if (!db) throw new Error("MySQL 未配置");
+  const connection = await db.getConnection();
+  try {
+    await connection.beginTransaction();
+    const transaction = {
+      async query<R = any>(sql: string, params?: Record<string, unknown> | unknown[]) {
+        const [rows] = await connection.query(queryOptions(sql), normalizeParams(params) as any);
+        return rows as R;
+      },
+      async execute(sql: string, params?: Record<string, unknown> | unknown[]) {
+        const [result] = await connection.execute(queryOptions(sql), normalizeParams(params) as any);
+        return result;
+      }
+    };
+    const result = await operation(transaction);
+    await connection.commit();
+    return result;
+  } catch (error) {
+    await connection.rollback().catch(() => undefined);
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
 export async function mysqlBatchQuery(
   queries: Array<{ sql: string; params?: Record<string, unknown> | unknown[] }>
 ) {
@@ -428,11 +461,13 @@ async function createSchema(db: mysql.Pool) {
       title varchar(255) not null,
       archived_at datetime null,
       pinned_at datetime null,
+      deleted_at datetime null,
       created_at datetime not null default current_timestamp,
       updated_at datetime not null default current_timestamp,
       index conversations_user_id_idx (user_id),
       index conversations_archived_at_idx (archived_at),
-      index conversations_pinned_at_idx (pinned_at)
+      index conversations_pinned_at_idx (pinned_at),
+      index conversations_deleted_at_idx (deleted_at)
     )`,
     `create table if not exists messages (
       id varchar(128) primary key,
@@ -786,9 +821,12 @@ async function applySchemaMigrations(db: mysql.Pool) {
     "alter table training_quiz_attempts add column duration_seconds int not null default 0",
     "alter table training_quiz_attempts add column started_at datetime null",
     "alter table training_quiz_attempts add column submitted_at datetime null",
+    `create unique index training_quiz_attempts_session_unique_idx on training_quiz_attempts(session_id)`,
     "alter table conversations add index conversations_archived_at_idx (archived_at)",
     "alter table conversations add column pinned_at datetime null",
+    "alter table conversations add column deleted_at datetime null",
     "alter table conversations add index conversations_pinned_at_idx (pinned_at)",
+    "alter table conversations add index conversations_deleted_at_idx (deleted_at)",
     "alter table messages add index messages_created_at_idx (created_at)",
     "alter table messages add index messages_conversation_created_idx (conversation_id, created_at)",
     "alter table documents add column security_level varchar(32) not null default 'internal'",
@@ -1008,7 +1046,7 @@ function isIgnorableMigrationError(error: unknown) {
   }
 
   const code = "code" in error ? String(error.code) : "";
-  return code === "ER_DUP_FIELDNAME" || code === "ER_DUP_KEYNAME" || code === "ER_DUP_ENTRY";
+  return code === "ER_DUP_FIELDNAME" || code === "ER_DUP_KEYNAME";
 }
 
 export function parseJson<T>(value: unknown, fallback: T): T {

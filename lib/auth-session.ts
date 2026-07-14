@@ -45,6 +45,16 @@ export function sessionMaxAgeSeconds() {
   return maxAgeSeconds;
 }
 
+export function authCookieOptions(maxAge = maxAgeSeconds) {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure: env.appBaseUrl.startsWith("https://"),
+    maxAge,
+    path: "/"
+  };
+}
+
 export async function createSessionToken(userId: string) {
   const payload: SessionPayload = {
     userId,
@@ -66,7 +76,7 @@ export async function verifySessionToken(token: string | undefined | null) {
   }
 
   const expected = await hmac(encodedPayload, env.authSecret);
-  if (signature !== expected) {
+  if (!constantTimeEqual(signature, expected)) {
     return null;
   }
 
@@ -80,4 +90,13 @@ export async function verifySessionToken(token: string | undefined | null) {
   } catch {
     return null;
   }
+}
+
+function constantTimeEqual(left: string, right: string) {
+  const length = Math.max(left.length, right.length);
+  let difference = left.length ^ right.length;
+  for (let index = 0; index < length; index += 1) {
+    difference |= (left.charCodeAt(index) || 0) ^ (right.charCodeAt(index) || 0);
+  }
+  return difference === 0;
 }

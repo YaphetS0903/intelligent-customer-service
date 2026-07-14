@@ -38,19 +38,19 @@ const audioBase64Keys = [
 const taskIdKeys = ["task_id", "taskId", "job_id", "jobId", "request_id", "requestId", "id"];
 const mimeTypeKeys = ["content_type", "contentType", "mime_type", "mimeType", "format"];
 
-export async function textToSpeech(input: string): Promise<SpeechAudio | null> {
+export async function textToSpeech(input: string, options: { signal?: AbortSignal } = {}): Promise<SpeechAudio | null> {
   if (!hasTtsConfig()) {
     return null;
   }
 
   if (env.ttsProvider === "custom") {
-    return customTextToSpeech(input);
+    return customTextToSpeech(input, options.signal);
   }
 
-  return openAITextToSpeech(input);
+  return openAITextToSpeech(input, options.signal);
 }
 
-async function openAITextToSpeech(input: string): Promise<SpeechAudio | null> {
+async function openAITextToSpeech(input: string, signal?: AbortSignal): Promise<SpeechAudio | null> {
   if (!hasOpenAIConfig()) {
     return null;
   }
@@ -64,7 +64,7 @@ async function openAITextToSpeech(input: string): Promise<SpeechAudio | null> {
     model: env.openaiTtsModel,
     voice: env.openaiTtsVoice,
     input
-  });
+  }, { signal });
 
   return {
     audio: await audio.arrayBuffer(),
@@ -72,9 +72,9 @@ async function openAITextToSpeech(input: string): Promise<SpeechAudio | null> {
   };
 }
 
-async function customTextToSpeech(input: string): Promise<SpeechAudio | null> {
+async function customTextToSpeech(input: string, signal?: AbortSignal): Promise<SpeechAudio | null> {
   if (env.ttsApiUrl.startsWith("wss://tts-api.xfyun.cn/")) {
-    return xfyunTextToSpeech(input);
+    return xfyunTextToSpeech(input, signal);
   }
 
   const body = renderJsonTemplate(
@@ -102,7 +102,8 @@ async function customTextToSpeech(input: string): Promise<SpeechAudio | null> {
       extraHeaders: env.ttsHeaders,
       contentType: "application/json"
     }),
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal
   });
 
   if (!response.ok) {
@@ -119,7 +120,7 @@ async function customTextToSpeech(input: string): Promise<SpeechAudio | null> {
   }
 
   const data = await response.json() as unknown;
-  const parsed = await parseCustomTtsJson(data);
+  const parsed = await parseCustomTtsJson(data, signal);
 
   if (parsed) {
     return parsed;
@@ -127,7 +128,7 @@ async function customTextToSpeech(input: string): Promise<SpeechAudio | null> {
 
   const taskId = findStringByKeys(data, taskIdKeys);
   if (taskId && env.ttsStatusUrl) {
-    const taskAudio = await pollCustomTtsTask(taskId);
+    const taskAudio = await pollCustomTtsTask(taskId, signal);
     if (taskAudio) {
       return taskAudio;
     }
@@ -136,7 +137,7 @@ async function customTextToSpeech(input: string): Promise<SpeechAudio | null> {
   throw new Error("TTS 接口未返回音频。请确认返回音频流，或 JSON 中包含 audio/audio_base64/audioUrl/url 字段；异步接口需配置 TTS_STATUS_URL。");
 }
 
-async function xfyunTextToSpeech(input: string): Promise<SpeechAudio | null> {
+async function xfyunTextToSpeech(input: string, signal?: AbortSignal): Promise<SpeechAudio | null> {
   const config = readXfyunTtsConfig();
   const url = buildXfyunTtsUrl(env.ttsApiUrl, env.ttsApiKey, config.apiSecret);
   const audioChunks: Buffer[] = [];
@@ -167,6 +168,7 @@ async function xfyunTextToSpeech(input: string): Promise<SpeechAudio | null> {
     const timeout = setTimeout(() => {
       finish(new Error("讯飞 TTS 连接超时"));
     }, 30000);
+    signal?.addEventListener("abort", () => finish(new Error("TTS 请求已超时")), { once: true });
 
     ws.addEventListener("open", () => {
       ws.send(JSON.stringify({
@@ -346,11 +348,11 @@ function normalizeEscapedTtsSettings(value: string) {
     .replace(/\\t/g, "\t");
 }
 
-async function parseCustomTtsJson(data: unknown): Promise<SpeechAudio | null> {
+async function parseCustomTtsJson(data: unknown, signal?: AbortSignal): Promise<SpeechAudio | null> {
   const url = findStringByKeys(data, audioUrlKeys);
 
   if (url) {
-    const response = await fetch(url);
+    const response = await fetch(url, { signal });
 
     if (!response.ok) {
       throw new Error(`TTS 音频下载失败：${response.status} ${response.statusText}`);
@@ -382,7 +384,7 @@ async function parseCustomTtsJson(data: unknown): Promise<SpeechAudio | null> {
   };
 }
 
-async function pollCustomTtsTask(taskId: string): Promise<SpeechAudio | null> {
+async function pollCustomTtsTask(taskId: string, signal?: AbortSignal): Promise<SpeechAudio | null> {
   const statusUrl = env.ttsStatusUrl.replace("{task_id}", encodeURIComponent(taskId)).replace("{job_id}", encodeURIComponent(taskId));
 
   for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -395,7 +397,8 @@ async function pollCustomTtsTask(taskId: string): Promise<SpeechAudio | null> {
         apiKey: env.ttsApiKey,
         authHeader: env.ttsAuthHeader,
         extraHeaders: env.ttsHeaders
-      })
+      }),
+      signal
     });
 
     if (!response.ok) {
@@ -414,7 +417,7 @@ async function pollCustomTtsTask(taskId: string): Promise<SpeechAudio | null> {
     }
 
     const data = await response.json().catch(() => null) as unknown;
-    const parsed = await parseCustomTtsJson(data);
+    const parsed = await parseCustomTtsJson(data, signal);
     if (parsed) {
       return parsed;
     }

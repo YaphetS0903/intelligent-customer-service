@@ -1,9 +1,6 @@
 import { randomBytes } from "crypto";
 import { NextResponse } from "next/server";
 import {
-  createTrainingCertificate,
-  createTrainingExamSession,
-  createTrainingQuizAttempt,
   getActiveTrainingExamSession,
   getCurrentUser,
   getTrainingCertificate,
@@ -11,12 +8,12 @@ import {
   getTrainingProgress,
   listTrainingQuizAttempts,
   listTrainingQuizQuestions,
+  startTrainingExam,
+  submitTrainingExam,
   updateTrainingExamSession
 } from "@/lib/db";
 import {
-  gradeTrainingExam,
   normalizeSubmittedAnswers,
-  prepareExamQuestions,
   publicTrainingQuizQuestions
 } from "@/lib/training-quiz";
 import { canAccessTrainingJob } from "@/lib/training-access";
@@ -65,71 +62,54 @@ export async function POST(request: Request, { params }: RouteContext) {
     if (!canAccessTrainingJob(user, job)) return NextResponse.json({ error: "无权访问该课程" }, { status: 403 });
     const body = await request.json().catch(() => ({}));
     if (body.action === "start") {
-      const [progress, attempts, questions, existing] = await Promise.all([
-        getTrainingProgress(id, user.id), listTrainingQuizAttempts(id, user.id), listTrainingQuizQuestions(id), getActiveTrainingExamSession(id, user.id)
+      const [progress, attempts, questions] = await Promise.all([
+        getTrainingProgress(id, user.id), listTrainingQuizAttempts(id, user.id), listTrainingQuizQuestions(id)
       ]);
       const reason = blockedReason(job, questions.length, progress?.progress_percent ?? 0, attempts.length);
       if (reason) return NextResponse.json({ error: reason }, { status: 400 });
-      if (existing && new Date(existing.expires_at).getTime() > Date.now()) return NextResponse.json({ session: publicSession(existing), settings: examSettings(job) });
-      if (existing) await updateTrainingExamSession(existing.id, { status: "expired", submitted_at: null });
-      const startedAt = new Date();
-      const session = await createTrainingExamSession({
-        training_job_id: id,
-        user_id: user.id,
-        question_snapshot: prepareExamQuestions(questions),
-        status: "in_progress",
-        started_at: startedAt.toISOString(),
-        expires_at: new Date(startedAt.getTime() + job.quiz_time_limit_minutes * 60_000).toISOString(),
-        submitted_at: null
+      const started = await startTrainingExam({
+        trainingJobId: id,
+        userId: user.id,
+        questions,
+        maxAttempts: job.quiz_max_attempts,
+        timeLimitMinutes: job.quiz_time_limit_minutes
       });
-      return NextResponse.json({ session: publicSession(session), settings: examSettings(job) }, { status: 201 });
+      return NextResponse.json(
+        { session: publicSession(started.session), settings: examSettings(job) },
+        { status: started.created ? 201 : 200 }
+      );
     }
 
     if (body.action !== "submit") return NextResponse.json({ error: "请先开始考试" }, { status: 400 });
-    const session = await getActiveTrainingExamSession(id, user.id);
-    if (!session || session.id !== String(body.session_id ?? "")) return NextResponse.json({ error: "考试会话不存在或已提交" }, { status: 400 });
-    if (new Date(session.expires_at).getTime() < Date.now()) {
-      await updateTrainingExamSession(session.id, { status: "expired", submitted_at: null });
-      return NextResponse.json({ error: "考试已超时，请重新开始" }, { status: 400 });
-    }
     const answers = normalizeSubmittedAnswers(body.answers);
-    const result = gradeTrainingExam(session.question_snapshot, answers, job.quiz_pass_score);
-    const attempts = await listTrainingQuizAttempts(id, user.id);
-    const submittedAt = new Date();
-    const attempt = await createTrainingQuizAttempt({
-      training_job_id: id,
-      user_id: user.id,
-      session_id: session.id,
+    const submitted = await submitTrainingExam({
+      trainingJobId: id,
+      userId: user.id,
+      sessionId: String(body.session_id ?? ""),
       answers,
-      result_detail: result.result_detail,
-      score: result.score,
-      passed: result.passed,
-      attempt_number: attempts.length + 1,
-      duration_seconds: Math.max(0, Math.round((submittedAt.getTime() - new Date(session.started_at).getTime()) / 1000)),
-      started_at: session.started_at,
-      submitted_at: submittedAt.toISOString()
+      passScore: job.quiz_pass_score,
+      maxAttempts: job.quiz_max_attempts,
+      certificateEnabled: job.certificate_enabled,
+      certificateNo: buildCertificateNumber()
     });
-    await updateTrainingExamSession(session.id, { status: "submitted", submitted_at: submittedAt.toISOString() });
-    let certificate = await getTrainingCertificate(id, user.id);
-    if (attempt.passed && job.certificate_enabled && !certificate) {
-      certificate = await createTrainingCertificate({
-        certificate_no: buildCertificateNumber(),
-        training_job_id: id,
-        user_id: user.id,
-        quiz_attempt_id: attempt.id,
-        issued_at: submittedAt.toISOString(),
-        revoked_at: null,
-        revoked_by: null,
-        revoke_reason: null
-      });
+    if (submitted.error || !submitted.attempt) {
+      return NextResponse.json({ error: submitted.error ?? "提交考试失败" }, { status: 400 });
+    }
+    if (submitted.certificateCreated && submitted.certificate) {
       await notifyUsers([user.id], {
         category: "system", severity: "success", title: "培训证书已签发",
-        body: `你已完成「${job.title}」并通过考试，证书编号 ${certificate.certificate_no}。`,
-        href: `/training/${job.id}`, source_type: "training_certificate", source_id: certificate.id,
-        dedupe_key: `training-certificate:${certificate.id}`, metadata: { training_job_id: id, certificate_id: certificate.id }
+        body: `你已完成「${job.title}」并通过考试，证书编号 ${submitted.certificate.certificate_no}。`,
+        href: `/training/${job.id}`, source_type: "training_certificate", source_id: submitted.certificate.id,
+        dedupe_key: `training-certificate:${submitted.certificate.id}`, metadata: { training_job_id: id, certificate_id: submitted.certificate.id }
       });
     }
-    return NextResponse.json({ attempt, correct: result.correct, total: result.total, result_detail: result.result_detail, certificate });
+    return NextResponse.json({
+      attempt: submitted.attempt,
+      correct: submitted.attempt.result_detail.filter((item) => item.correct).length,
+      total: submitted.attempt.result_detail.length,
+      result_detail: submitted.attempt.result_detail,
+      certificate: submitted.certificate
+    });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "提交考试失败" }, { status: 400 });
   }

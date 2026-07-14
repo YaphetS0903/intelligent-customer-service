@@ -160,6 +160,7 @@ create table if not exists public.conversations (
   title text not null,
   archived_at timestamptz,
   pinned_at timestamptz,
+  deleted_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -392,6 +393,7 @@ create index if not exists document_version_chunks_document_id_idx on public.doc
 create index if not exists document_version_chunks_knowledge_base_id_idx on public.document_version_chunks(knowledge_base_id);
 create index if not exists conversations_user_id_idx on public.conversations(user_id);
 create index if not exists conversations_archived_at_idx on public.conversations(archived_at);
+create index if not exists conversations_deleted_at_idx on public.conversations(deleted_at);
 create index if not exists conversations_pinned_at_idx on public.conversations(pinned_at);
 create index if not exists messages_conversation_id_idx on public.messages(conversation_id);
 create index if not exists feedback_message_id_idx on public.feedback(message_id);

@@ -1,8 +1,15 @@
+import { redirect } from "next/navigation";
 import { BackupOperationsAdmin } from "@/components/backup-operations-admin";
 import { RuntimeMonitorAdmin } from "@/components/runtime-monitor-admin";
 import { Shell } from "@/components/shell";
+import { requireAdmin } from "@/lib/db";
 
-export default function OperationsPage() {
+export default async function OperationsPage() {
+  try {
+    await requireAdmin();
+  } catch {
+    redirect("/");
+  }
   return (
     <Shell>
       <div className="space-y-5">

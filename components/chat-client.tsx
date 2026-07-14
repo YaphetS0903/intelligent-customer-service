@@ -533,7 +533,7 @@ export function ChatClient() {
       }
       pushSuccess(
         archived ? "会话已归档" : "会话已恢复",
-        archived ? "可在归档会话中查看或永久删除。" : "已恢复到最近会话。"
+        archived ? "可在归档会话中查看或从个人列表移除。" : "已恢复到最近会话。"
       );
     } catch (error) {
       pushActionError(error, "会话状态更新失败");
@@ -653,7 +653,7 @@ export function ChatClient() {
 
       setDeleteConfirmConversation(null);
       await loadConversations("archived");
-      pushSuccess("归档会话已永久删除");
+      pushSuccess("归档会话已从个人列表移除，审计记录将按规则保留");
     } catch (error) {
       pushActionError(error, "会话删除失败");
     } finally {
@@ -1525,13 +1525,13 @@ function ConversationDeleteDialog({
           </span>
           <div className="min-w-0">
             <h3 id={titleId} className="text-base font-semibold text-ink">
-              永久删除归档会话？
+              从个人列表移除归档会话？
             </h3>
             <p className="mt-2 text-sm leading-6 text-slate-600">
               将删除「{conversation.title || "新的对话"}」以及该会话下的消息、反馈和人工工单记录。删除后无法恢复。
             </p>
             <div className="mt-3 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs leading-5 text-red-700">
-              只有已经归档的会话才能永久删除，最近会话需要先归档。
+              只有已经归档的会话才能移除。相关工单、安全事件和审计记录仍会按企业规则保留。
             </div>
           </div>
         </div>
@@ -1552,7 +1552,7 @@ function ConversationDeleteDialog({
             className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-wait disabled:bg-red-300"
           >
             {deleting ? <Loader2 className="animate-spin" size={16} /> : <Trash2 size={16} />}
-            永久删除
+            确认移除
           </button>
         </div>
       </section>

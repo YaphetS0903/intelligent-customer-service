@@ -53,7 +53,13 @@ async function loginWithCredentials(page: Page, email: string, password: string)
 
 async function ensureEmployeeAccount(page: Page) {
   const employeeEmail = process.env.E2E_EMPLOYEE_EMAIL || "test.employee@tianrui.local";
-  const response = await page.request.post("/api/auth/register", {
+  const adminCredentials = {
+    email: process.env.INITIAL_ADMIN_EMAIL || "admin@e2e.local",
+    password: process.env.INITIAL_ADMIN_PASSWORD || process.env.E2E_TEST_PASSWORD || "local-e2e-password"
+  };
+  const adminLogin = await page.request.post("/api/auth/login", { data: adminCredentials, failOnStatusCode: false });
+  if (!adminLogin.ok()) throw new Error(`管理员登录失败：${await adminLogin.text()}`);
+  const response = await page.request.post("/api/users", {
     data: {
       email: employeeEmail,
       password: process.env.E2E_TEST_PASSWORD || "local-e2e-password",
@@ -64,14 +70,26 @@ async function ensureEmployeeAccount(page: Page) {
     failOnStatusCode: false
   });
 
-  if (response.ok()) {
-    return;
-  }
+  if (response.ok()) return;
 
   const text = await response.text();
   if (!/已存在|duplicate|Duplicate/i.test(text)) {
     throw new Error(`创建测试员工失败：${text}`);
   }
+}
+
+async function createTestEmployee(page: Page, marker: string) {
+  const adminEmail = process.env.INITIAL_ADMIN_EMAIL || "admin@e2e.local";
+  const adminPassword = process.env.INITIAL_ADMIN_PASSWORD || process.env.E2E_TEST_PASSWORD || "local-e2e-password";
+  await loginWithCredentials(page, adminEmail, adminPassword);
+  const email = `security.${marker.toLowerCase()}@tianrui.local`;
+  const password = process.env.E2E_TEST_PASSWORD || "local-e2e-password";
+  const response = await page.request.post("/api/users", {
+    data: { email, password, name: `安全测试 ${marker}`, department: "生产部", position: "操作员", role: "employee" },
+    failOnStatusCode: false
+  });
+  if (!response.ok()) throw new Error(`创建安全测试员工失败：${await response.text()}`);
+  return { ...(await response.json()).user as { id: string; email: string }, email, password };
 }
 
 async function ensureDemoData(page: Page) {
@@ -224,6 +242,224 @@ test.describe("天瑞内饰智能客服回归", () => {
     await expect(page.getByRole("link", { name: "培训课程" })).toBeVisible();
   });
 
+  test("生产安全边界拒绝自助注册、匿名 TTS 和员工后台访问", async ({ page }) => {
+    const register = await page.request.post("/api/auth/register", {
+      data: { email: `blocked.${Date.now()}@tianrui.local`, password: "blocked-password", name: "禁止注册" },
+      failOnStatusCode: false
+    });
+    expect(register.status()).toBe(403);
+
+    const tts = await page.request.post("/api/tts", {
+      data: { text: "匿名语音请求" },
+      failOnStatusCode: false
+    });
+    expect(tts.status()).toBe(401);
+
+    await tryLogin(page, "employee");
+    const dashboard = await page.request.get("/api/dashboard", { failOnStatusCode: false });
+    expect(dashboard.status()).toBe(403);
+    const insights = await page.request.get("/api/admin/insights", { failOnStatusCode: false });
+    expect(insights.status()).toBe(403);
+    await gotoWithRetry(page, "/admin/operations");
+    await expect(page).toHaveURL(/\/chat$/);
+  });
+
+  test("登录 Cookie 按应用地址统一设置安全属性", async ({ page }) => {
+    const email = process.env.INITIAL_ADMIN_EMAIL || "admin@e2e.local";
+    const password = process.env.INITIAL_ADMIN_PASSWORD || process.env.E2E_TEST_PASSWORD || "local-e2e-password";
+    const response = await page.request.post("/api/auth/login", {
+      data: { email, password },
+      failOnStatusCode: false
+    });
+    expect(response.ok(), await response.text()).toBeTruthy();
+    const cookie = response.headers()["set-cookie"] ?? "";
+    expect(cookie).toContain("tr_auth_session=");
+    expect(cookie.toLowerCase()).toContain("httponly");
+    expect(cookie.toLowerCase()).toContain("samesite=lax");
+    if ((process.env.APP_BASE_URL ?? "").startsWith("https://")) {
+      expect(cookie.toLowerCase()).toContain("secure");
+    } else {
+      expect(cookie.toLowerCase()).not.toContain("secure");
+    }
+  });
+
+  test("禁用管理员后旧登录会话立即失效", async ({ page, browser }) => {
+    const marker = `DISABLED-ADMIN-${Date.now()}`;
+    const target = await createTestEmployee(page, marker);
+    const promote = await page.request.patch(`/api/users/${target.id}`, {
+      data: { name: `临时管理员 ${marker}`, role: "admin", department: "信息部", position: "管理员", status: "active" },
+      failOnStatusCode: false
+    });
+    expect(promote.ok(), await promote.text()).toBeTruthy();
+
+    const targetContext = await browser.newContext({ baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100" });
+    const targetPage = await targetContext.newPage();
+    try {
+      await loginWithCredentials(targetPage, target.email, target.password);
+      const beforeDisable = await targetPage.request.get("/api/dashboard", { failOnStatusCode: false });
+      expect(beforeDisable.ok(), await beforeDisable.text()).toBeTruthy();
+
+      const disable = await page.request.patch(`/api/users/${target.id}`, {
+        data: { name: `临时管理员 ${marker}`, role: "employee", department: "信息部", position: "管理员", status: "disabled" },
+        failOnStatusCode: false
+      });
+      expect(disable.ok(), await disable.text()).toBeTruthy();
+
+      const oldSession = await targetPage.request.get("/api/auth/me", { failOnStatusCode: false });
+      expect(oldSession.status()).toBe(401);
+      const oldDashboard = await targetPage.request.get("/api/dashboard", { failOnStatusCode: false });
+      expect(oldDashboard.ok()).toBeFalsy();
+    } finally {
+      await targetContext.close();
+      await page.request.patch(`/api/users/${target.id}`, {
+        data: { name: `安全测试 ${marker}`, role: "employee", department: "生产部", position: "操作员", status: "disabled" },
+        failOnStatusCode: false
+      });
+    }
+  });
+
+  test("上传接口拒绝伪装 PDF 和异常 XLSX", async ({ page }) => {
+    await tryLogin(page);
+    const knowledgeBasesResponse = await page.request.get("/api/knowledge-bases", { failOnStatusCode: false });
+    expect(knowledgeBasesResponse.ok(), await knowledgeBasesResponse.text()).toBeTruthy();
+    const knowledgeBaseId = ((await knowledgeBasesResponse.json()).knowledgeBases as Array<{ id: string }>)[0]?.id;
+    expect(knowledgeBaseId).toBeTruthy();
+
+    const fakePdf = await page.request.post("/api/documents/upload", {
+      multipart: {
+        knowledge_base_id: knowledgeBaseId,
+        file: { name: "fake.pdf", mimeType: "application/pdf", buffer: Buffer.from("not-a-pdf") }
+      },
+      failOnStatusCode: false
+    });
+    expect(fakePdf.status()).toBe(400);
+    expect((await fakePdf.json()).error).toContain("不是有效的 PDF 文件");
+
+    const fakeXlsx = await page.request.post("/api/documents/upload", {
+      multipart: {
+        knowledge_base_id: knowledgeBaseId,
+        file: {
+          name: "fake.xlsx",
+          mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          buffer: Buffer.from("not-an-office-archive")
+        }
+      },
+      failOnStatusCode: false
+    });
+    expect(fakeXlsx.status()).toBe(400);
+    expect((await fakeXlsx.json()).error).toContain("不是有效的 Office Open XML 文件");
+  });
+
+  test("反馈和工单校验归属且软删除保留审计", async ({ page }) => {
+    test.setTimeout(240_000);
+    const marker = `OWNERSHIP-${Date.now()}`;
+    const first = await createTestEmployee(page, `${marker}-A`);
+    const second = await createTestEmployee(page, `${marker}-B`);
+
+    await loginWithCredentials(page, first.email, first.password);
+    const chatResponse = await page.request.post("/api/chat", {
+      data: { message: `请回答安全测试问题 ${marker}` },
+      failOnStatusCode: false,
+      timeout: 60_000
+    });
+    expect(chatResponse.ok(), await chatResponse.text()).toBeTruthy();
+    const chat = await chatResponse.json() as {
+      conversation: { id: string };
+      messages: Array<{ id: string; role: string }>;
+    };
+    const assistantMessage = chat.messages.find((message) => message.role === "assistant");
+    expect(assistantMessage).toBeTruthy();
+
+    const firstFeedback = await page.request.post("/api/feedback", {
+      data: { message_id: assistantMessage!.id, rating: "like", comment: marker }
+    });
+    expect(firstFeedback.ok(), await firstFeedback.text()).toBeTruthy();
+    const firstFeedbackId = (await firstFeedback.json()).feedback.id as string;
+    const updatedFeedback = await page.request.post("/api/feedback", {
+      data: { message_id: assistantMessage!.id, rating: "dislike", comment: `${marker}-updated` }
+    });
+    expect(updatedFeedback.ok(), await updatedFeedback.text()).toBeTruthy();
+    expect((await updatedFeedback.json()).feedback).toEqual(expect.objectContaining({ id: firstFeedbackId, rating: "dislike" }));
+
+    const ticketResponse = await page.request.post("/api/tickets", {
+      data: {
+        conversation_id: chat.conversation.id,
+        message_id: assistantMessage!.id,
+        title: `归属测试 ${marker}`,
+        description: `验证软删除审计保留 ${marker}`
+      }
+    });
+    expect(ticketResponse.ok(), await ticketResponse.text()).toBeTruthy();
+    const ticketId = (await ticketResponse.json()).ticket.id as string;
+
+    await loginWithCredentials(page, second.email, second.password);
+    const foreignFeedback = await page.request.post("/api/feedback", {
+      data: { message_id: assistantMessage!.id, rating: "like" },
+      failOnStatusCode: false
+    });
+    expect(foreignFeedback.status()).toBe(403);
+    const foreignTicket = await page.request.post("/api/tickets", {
+      data: { conversation_id: chat.conversation.id, title: marker, description: marker },
+      failOnStatusCode: false
+    });
+    expect(foreignTicket.status()).toBe(403);
+
+    await loginWithCredentials(page, first.email, first.password);
+    const archive = await page.request.patch(`/api/conversations/${chat.conversation.id}`, { data: { archived: true } });
+    expect(archive.ok(), await archive.text()).toBeTruthy();
+    const remove = await page.request.delete(`/api/conversations/${chat.conversation.id}`);
+    expect(remove.ok(), await remove.text()).toBeTruthy();
+    const archivedList = await page.request.get("/api/conversations?view=archived");
+    expect((await archivedList.json()).conversations.map((item: { id: string }) => item.id)).not.toContain(chat.conversation.id);
+
+    await tryLogin(page);
+    const adminInsights = await getWithRetry(page, "/api/admin/insights", 4);
+    const audit = (await adminInsights.json()).insights as {
+      conversations: Array<{ id: string; deleted_at: string | null }>;
+      feedback: Array<{ id: string }>;
+      tickets: Array<{ id: string }>;
+    };
+    expect(audit.conversations).toEqual(expect.arrayContaining([expect.objectContaining({ id: chat.conversation.id, deleted_at: expect.any(String) })]));
+    expect(audit.feedback.map((item) => item.id)).toContain(firstFeedbackId);
+    expect(audit.tickets.map((item) => item.id)).toContain(ticketId);
+    const dashboardResponse = await page.request.get("/api/dashboard", { failOnStatusCode: false });
+    expect(dashboardResponse.ok(), await dashboardResponse.text()).toBeTruthy();
+    const dashboard = (await dashboardResponse.json()).dashboard as { totals: { messages: number } };
+    expect(dashboard.totals.messages).toBeGreaterThanOrEqual(chat.messages.length);
+  });
+
+  test("连续登录失败触发账号锁定和安全事件", async ({ page }) => {
+    const marker = `LOCK-${Date.now()}`;
+    const employee = await createTestEmployee(page, marker);
+    await page.request.post("/api/auth/logout");
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const response = await page.request.post("/api/auth/login", {
+        data: { email: employee.email, password: `wrong-${attempt}` },
+        failOnStatusCode: false
+      });
+      expect(response.status()).toBe(401);
+    }
+    const blocked = await page.request.post("/api/auth/login", {
+      data: { email: employee.email, password: "wrong-final" },
+      failOnStatusCode: false
+    });
+    expect(blocked.status()).toBe(429);
+    const correctWhileBlocked = await page.request.post("/api/auth/login", {
+      data: { email: employee.email, password: employee.password },
+      failOnStatusCode: false
+    });
+    expect(correctWhileBlocked.status()).toBe(429);
+
+    await tryLogin(page);
+    await expect.poll(async () => {
+      const response = await page.request.get("/api/admin/insights");
+      const insights = (await response.json()).insights;
+      return insights.securityEvents.some((event: { metadata?: { detector?: string; email?: string } }) =>
+        event.metadata?.detector === "login_failure_lockout" && event.metadata?.email === employee.email
+      );
+    }, { timeout: 30_000 }).toBeTruthy();
+  });
+
   test("手机端管理菜单可以展开并访问完整导航", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await tryLogin(page);
@@ -234,15 +470,15 @@ test.describe("天瑞内饰智能客服回归", () => {
     await menuButton.click();
     await expect(page.getByRole("navigation", { name: "移动端主导航" })).toBeVisible();
     await expect(page.getByRole("link", { name: "系统配置" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "运营与审计" })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("link", { name: "审计与工单" })).toHaveAttribute("aria-current", "page");
   });
 
   test("管理端知识管理可以加载", async ({ page }) => {
     await tryLogin(page);
-    await gotoWithRetry(page, "/admin");
+    await gotoWithRetry(page, "/admin/documents");
 
     await expect(page.getByRole("heading", { name: "知识管理" })).toBeVisible();
-    await expectTextWithReload(page, "/admin", "资料入库流程");
+    await expectTextWithReload(page, "/admin/documents", "资料入库流程");
     await expect(page.getByText("权限配置")).toBeVisible();
     await expect(page.getByText(/新资料默认草稿/)).toBeVisible();
     await expect(page.getByText("资料版本记录")).toBeVisible();
@@ -286,9 +522,14 @@ test.describe("天瑞内饰智能客服回归", () => {
     const marker = `TICKET-E2E-${Date.now()}`;
 
     await tryLogin(page, "employee");
+    const conversationResponse = await page.request.post("/api/conversations", {
+      data: { title: `工单会话 ${marker}` }
+    });
+    expect(conversationResponse.ok(), await conversationResponse.text()).toBeTruthy();
+    const conversationId = (await conversationResponse.json()).conversation.id as string;
     const createResponse = await page.request.post("/api/tickets", {
       data: {
-        conversation_id: `conv-${marker}`,
+        conversation_id: conversationId,
         title: `闭环工单 ${marker}`,
         description: `员工提交人工协助：${marker}`,
         priority: "urgent"
@@ -1209,6 +1450,142 @@ test.describe("天瑞内饰智能客服回归", () => {
     for (const question of quizPayload.session?.question_snapshot ?? []) {
       expect(question).not.toHaveProperty("correct_answers");
       expect(question).not.toHaveProperty("explanation");
+    }
+  });
+
+  test("培训考试并发开始和提交保持幂等", async ({ page }) => {
+    test.setTimeout(300_000);
+    const marker = `QUIZ-${Date.now()}`;
+    await tryLogin(page);
+    const coursesResponse = await page.request.get("/api/training", { failOnStatusCode: false });
+    expect(coursesResponse.ok(), await coursesResponse.text()).toBeTruthy();
+    const courses = (await coursesResponse.json()).trainingJobs as Array<{ id: string; title: string }>;
+    const course = courses.find((item) => item.title === "演示课程-车间安全与质量培训");
+    expect(course).toBeTruthy();
+    const originalQuizResponse = await page.request.get(`/api/admin/training-quiz/${course!.id}`, { failOnStatusCode: false });
+    expect(originalQuizResponse.ok(), await originalQuizResponse.text()).toBeTruthy();
+    const originalQuiz = await originalQuizResponse.json() as {
+      job: {
+        mandatory: boolean;
+        due_at: string | null;
+        quiz_enabled: boolean;
+        quiz_pass_score: number;
+        quiz_max_attempts: number;
+        quiz_time_limit_minutes: number;
+        certificate_enabled: boolean;
+      };
+      questions: Array<Record<string, unknown> & { status: "draft" | "published" }>;
+    };
+
+    const quizSetup = await page.request.put(`/api/admin/training-quiz/${course!.id}`, {
+      data: {
+        questions: [{
+          type: "true_false",
+          prompt: `${marker}：发现设备异常时应立即停止操作。`,
+          options: ["正确", "错误"],
+          correct_answers: ["正确"],
+          explanation: "发现设备异常时应立即停止操作并通知相关人员。",
+          score_weight: 1
+        }],
+        settings: {
+          mandatory: true,
+          due_at: null,
+          quiz_enabled: true,
+          quiz_pass_score: 60,
+          quiz_max_attempts: 3,
+          quiz_time_limit_minutes: 5,
+          certificate_enabled: false
+        },
+        publish: true
+      },
+      failOnStatusCode: false
+    });
+    expect(quizSetup.ok(), await quizSetup.text()).toBeTruthy();
+    const employee = await createTestEmployee(page, marker);
+
+    try {
+      await loginWithCredentials(page, employee.email, employee.password);
+      let progressPercent = 0;
+      let firstHeartbeat = true;
+      for (let pageIndex = 0; pageIndex < 3; pageIndex += 1) {
+        for (let heartbeat = 0; heartbeat < 8; heartbeat += 1) {
+          if (!firstHeartbeat) await page.waitForTimeout(2_200);
+          firstHeartbeat = false;
+          const progressResponse = await page.request.patch(`/api/training/${course!.id}/progress`, {
+            data: {
+              current_page: pageIndex,
+              consumed_seconds_delta: 30,
+              active_seconds_delta: 15,
+              playback_position_seconds: 0
+            },
+            failOnStatusCode: false
+          });
+          expect(progressResponse.ok(), await progressResponse.text()).toBeTruthy();
+          const progress = (await progressResponse.json()).progress as { completed_pages: number[]; progress_percent: number };
+          progressPercent = progress.progress_percent;
+          if (progress.completed_pages.includes(pageIndex)) break;
+        }
+      }
+      expect(progressPercent).toBe(100);
+
+      const startResponses = await Promise.all([
+        page.request.post(`/api/training/${course!.id}/quiz`, { data: { action: "start" }, failOnStatusCode: false }),
+        page.request.post(`/api/training/${course!.id}/quiz`, { data: { action: "start" }, failOnStatusCode: false })
+      ]);
+      for (const response of startResponses) expect(response.ok(), await response.text()).toBeTruthy();
+      const started = await Promise.all(startResponses.map((response) => response.json())) as Array<{
+        session: { id: string; question_snapshot: Array<{ id: string; prompt: string }> };
+      }>;
+      expect(started[0].session.id).toBe(started[1].session.id);
+      expect(started[0].session.question_snapshot).toHaveLength(1);
+      const questionId = started[0].session.question_snapshot[0].id;
+      const submission = {
+        action: "submit",
+        session_id: started[0].session.id,
+        answers: { [questionId]: "正确" }
+      };
+      const submitResponses = await Promise.all([
+        page.request.post(`/api/training/${course!.id}/quiz`, { data: submission, failOnStatusCode: false }),
+        page.request.post(`/api/training/${course!.id}/quiz`, { data: submission, failOnStatusCode: false })
+      ]);
+      for (const response of submitResponses) expect(response.ok(), await response.text()).toBeTruthy();
+      const submitted = await Promise.all(submitResponses.map((response) => response.json())) as Array<{
+        attempt: { id: string; session_id: string; attempt_number: number; score: number };
+      }>;
+      expect(submitted[0].attempt.id).toBe(submitted[1].attempt.id);
+      expect(submitted[0].attempt).toEqual(expect.objectContaining({
+        session_id: started[0].session.id,
+        attempt_number: 1,
+        score: 100
+      }));
+
+      const quizState = await page.request.get(`/api/training/${course!.id}/quiz`, { failOnStatusCode: false });
+      expect(quizState.ok(), await quizState.text()).toBeTruthy();
+      const attempts = (await quizState.json()).attempts as Array<{ id: string }>;
+      expect(attempts).toHaveLength(1);
+      expect(attempts[0].id).toBe(submitted[0].attempt.id);
+    } finally {
+      await tryLogin(page);
+      await page.request.put(`/api/admin/training-quiz/${course!.id}`, {
+        data: {
+          questions: originalQuiz.questions,
+          settings: {
+            mandatory: originalQuiz.job.mandatory,
+            due_at: originalQuiz.job.due_at,
+            quiz_enabled: originalQuiz.job.quiz_enabled,
+            quiz_pass_score: originalQuiz.job.quiz_pass_score,
+            quiz_max_attempts: originalQuiz.job.quiz_max_attempts,
+            quiz_time_limit_minutes: originalQuiz.job.quiz_time_limit_minutes,
+            certificate_enabled: originalQuiz.job.certificate_enabled
+          },
+          publish: originalQuiz.questions.length > 0 && originalQuiz.questions.every((question) => question.status === "published")
+        },
+        failOnStatusCode: false
+      });
+      await page.request.patch(`/api/users/${employee.id}`, {
+        data: { name: `安全测试 ${marker}`, role: "employee", department: "生产部", position: "操作员", status: "disabled" },
+        failOnStatusCode: false
+      });
     }
   });
 });

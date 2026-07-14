@@ -1,10 +1,11 @@
 import { cookies } from "next/headers";
 import { sessionCookieName, verifySessionToken } from "@/lib/auth-session";
 import { createId, demoUser } from "@/lib/mock-store";
-import { mysqlBatchQuery, mysqlExecute, mysqlQuery, parseJson, toIsoString } from "@/lib/mysql";
+import { mysqlBatchQuery, mysqlExecute, mysqlQuery, mysqlTransaction, parseJson, toIsoString } from "@/lib/mysql";
 import { hashPassword } from "@/lib/password";
 import { createConversationTitleFromMessage, isDefaultConversationTitle } from "@/lib/conversation-title";
 import { calculateTicketDueAt, isTicketClosedStatus, resolveTicketResolvedAt } from "@/lib/service-ticket-rules";
+import { gradeTrainingExam, prepareExamQuestions } from "@/lib/training-quiz";
 import type {
   AppNotification,
   Conversation,
@@ -313,6 +314,7 @@ function conversationFromRow(row: Row): Conversation {
     title: row.title,
     archived_at: row.archived_at ? toIsoString(row.archived_at) : null,
     pinned_at: row.pinned_at ? toIsoString(row.pinned_at) : null,
+    deleted_at: row.deleted_at ? toIsoString(row.deleted_at) : null,
     created_at: toIsoString(row.created_at),
     updated_at: toIsoString(row.updated_at)
   };
@@ -1859,7 +1861,7 @@ export async function listConversations(
       )`
     : "";
   const rows = await mysqlQuery<Row[]>(
-    `select * from conversations where user_id = :userId ${archiveClause} ${searchClause} ${orderClause}`,
+    `select * from conversations where user_id = :userId and deleted_at is null ${archiveClause} ${searchClause} ${orderClause}`,
     { userId, search: `%${trimmedQuery}%` }
   );
   return rows.map(conversationFromRow);
@@ -1877,7 +1879,7 @@ export async function upsertConversation(title: string, conversationId?: string)
 
   if (conversationId) {
     const rows = await mysqlQuery<Row[]>(
-      "select * from conversations where id = :conversationId and user_id = :userId limit 1",
+      "select * from conversations where id = :conversationId and user_id = :userId and deleted_at is null limit 1",
       { conversationId, userId: user.id }
     );
 
@@ -1889,6 +1891,7 @@ export async function upsertConversation(title: string, conversationId?: string)
           set title = :title,
             archived_at = null,
             pinned_at = null,
+            deleted_at = null,
             updated_at = :now
           where id = :conversationId`,
         { title: shouldUpdateTitle ? normalizedTitle : rows[0].title, now, conversationId }
@@ -1909,17 +1912,19 @@ export async function upsertConversation(title: string, conversationId?: string)
     title: normalizedTitle,
     archived_at: null,
     pinned_at: null,
+    deleted_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   };
   await mysqlExecute(
-    "insert into conversations (id, user_id, title, archived_at, pinned_at, created_at, updated_at) values (:id, :user_id, :title, :archived_at, :pinned_at, :created_at, :updated_at)",
+    "insert into conversations (id, user_id, title, archived_at, pinned_at, deleted_at, created_at, updated_at) values (:id, :user_id, :title, :archived_at, :pinned_at, :deleted_at, :created_at, :updated_at)",
     {
       id: record.id,
       user_id: record.user_id,
       title: record.title,
       archived_at: record.archived_at,
       pinned_at: record.pinned_at,
+      deleted_at: record.deleted_at,
       created_at: now,
       updated_at: now
     }
@@ -1934,12 +1939,12 @@ export async function archiveConversation(conversationId: string, archived: bool
 
   if (archived) {
     await mysqlExecute(
-      "update conversations set archived_at = :archivedAt, pinned_at = null, updated_at = :now where id = :conversationId and user_id = :userId",
+      "update conversations set archived_at = :archivedAt, pinned_at = null, updated_at = :now where id = :conversationId and user_id = :userId and deleted_at is null",
       { archivedAt, now, conversationId, userId: user.id }
     );
   } else {
     await mysqlExecute(
-      "update conversations set archived_at = :archivedAt, updated_at = :now where id = :conversationId and user_id = :userId",
+      "update conversations set archived_at = :archivedAt, updated_at = :now where id = :conversationId and user_id = :userId and deleted_at is null",
       { archivedAt, now, conversationId, userId: user.id }
     );
   }
@@ -1957,12 +1962,12 @@ export async function pinConversation(conversationId: string, pinned: boolean) {
   const pinnedAt = pinned ? new Date().toISOString().slice(0, 19).replace("T", " ") : null;
 
   await mysqlExecute(
-    "update conversations set pinned_at = :pinnedAt where id = :conversationId and user_id = :userId and archived_at is null",
+    "update conversations set pinned_at = :pinnedAt where id = :conversationId and user_id = :userId and archived_at is null and deleted_at is null",
     { pinnedAt, conversationId, userId: user.id }
   );
 
   const rows = await mysqlQuery<Row[]>(
-    "select * from conversations where id = :conversationId and user_id = :userId and archived_at is null limit 1",
+    "select * from conversations where id = :conversationId and user_id = :userId and archived_at is null and deleted_at is null limit 1",
     { conversationId, userId: user.id }
   );
 
@@ -1974,12 +1979,12 @@ export async function renameConversation(conversationId: string, title: string) 
   const now = new Date().toISOString().slice(0, 19).replace("T", " ");
 
   await mysqlExecute(
-    "update conversations set title = :title, updated_at = :now where id = :conversationId and user_id = :userId",
+    "update conversations set title = :title, updated_at = :now where id = :conversationId and user_id = :userId and deleted_at is null",
     { title, now, conversationId, userId: user.id }
   );
 
   const rows = await mysqlQuery<Row[]>(
-    "select * from conversations where id = :conversationId and user_id = :userId limit 1",
+    "select * from conversations where id = :conversationId and user_id = :userId and deleted_at is null limit 1",
     { conversationId, userId: user.id }
   );
 
@@ -1989,7 +1994,7 @@ export async function renameConversation(conversationId: string, title: string) 
 export async function deleteArchivedConversation(conversationId: string) {
   const user = await getCurrentUser();
   const rows = await mysqlQuery<Row[]>(
-    "select * from conversations where id = :conversationId and user_id = :userId and archived_at is not null limit 1",
+    "select * from conversations where id = :conversationId and user_id = :userId and archived_at is not null and deleted_at is null limit 1",
     { conversationId, userId: user.id }
   );
 
@@ -1997,23 +2002,11 @@ export async function deleteArchivedConversation(conversationId: string) {
     return false;
   }
 
+  const deletedAt = new Date().toISOString();
   await mysqlExecute(
-    "delete from service_ticket_comments where ticket_id in (select id from service_tickets where conversation_id = :conversationId)",
-    { conversationId }
+    "update conversations set deleted_at = :deletedAt, pinned_at = null, updated_at = :deletedAt where id = :conversationId and user_id = :userId and deleted_at is null",
+    { deletedAt, conversationId, userId: user.id }
   );
-  await mysqlExecute("delete from service_tickets where conversation_id = :conversationId", { conversationId });
-  await mysqlExecute("delete from knowledge_tasks where conversation_id = :conversationId", { conversationId });
-  await mysqlExecute("delete from security_events where conversation_id = :conversationId", { conversationId });
-  await mysqlExecute("delete from model_usage_events where conversation_id = :conversationId", { conversationId });
-  await mysqlExecute(
-    "delete from feedback where message_id in (select id from messages where conversation_id = :conversationId)",
-    { conversationId }
-  );
-  await mysqlExecute("delete from messages where conversation_id = :conversationId", { conversationId });
-  await mysqlExecute("delete from conversations where id = :conversationId and user_id = :userId", {
-    conversationId,
-    userId: user.id
-  });
 
   return true;
 }
@@ -2024,6 +2017,28 @@ export async function listMessages(conversationId: string) {
     { conversationId }
   );
   return rows.map(messageFromRow);
+}
+
+export async function getOwnedConversation(conversationId: string, userId: string) {
+  const rows = await mysqlQuery<Row[]>(
+    "select * from conversations where id = :conversationId and user_id = :userId and deleted_at is null limit 1",
+    { conversationId, userId }
+  );
+  return rows[0] ? conversationFromRow(rows[0]) : null;
+}
+
+export async function getOwnedMessage(messageId: string, userId: string, conversationId?: string) {
+  const rows = await mysqlQuery<Row[]>(
+    `select messages.* from messages
+      inner join conversations on conversations.id = messages.conversation_id
+      where messages.id = :messageId
+        and conversations.user_id = :userId
+        and conversations.deleted_at is null
+        ${conversationId ? "and conversations.id = :conversationId" : ""}
+      limit 1`,
+    { messageId, userId, conversationId: conversationId ?? null }
+  );
+  return rows[0] ? messageFromRow(rows[0]) : null;
 }
 
 export async function listAllMessages() {
@@ -2181,6 +2196,25 @@ export async function createFeedback(
   input: Omit<Feedback, "id" | "created_at" | "status" | "resolution_note" | "needs_knowledge_update"> &
     Partial<Pick<Feedback, "status" | "resolution_note" | "needs_knowledge_update">>
 ) {
+  const existingRows = await mysqlQuery<Row[]>(
+    "select * from feedback where message_id = :message_id and user_id = :user_id order by created_at desc limit 1",
+    { message_id: input.message_id, user_id: input.user_id }
+  );
+  if (existingRows[0]) {
+    await mysqlExecute(
+      `update feedback set rating = :rating, comment = :comment, status = 'pending', resolution_note = null,
+        needs_knowledge_update = :needs_knowledge_update where id = :id`,
+      {
+        id: existingRows[0].id,
+        rating: input.rating,
+        comment: input.comment,
+        needs_knowledge_update: input.rating === "dislike"
+      }
+    );
+    const updatedRows = await mysqlQuery<Row[]>("select * from feedback where id = :id limit 1", { id: existingRows[0].id });
+    return feedbackFromRow(updatedRows[0]);
+  }
+
   const record: Feedback = {
     id: createId("feedback"),
     created_at: new Date().toISOString(),
@@ -2884,6 +2918,157 @@ export async function createTrainingQuizAttempt(input: Omit<TrainingQuizAttempt,
     }
   );
   return record;
+}
+
+export async function startTrainingExam(input: {
+  trainingJobId: string;
+  userId: string;
+  questions: TrainingQuizQuestion[];
+  maxAttempts: number;
+  timeLimitMinutes: number;
+}) {
+  return mysqlTransaction(async (transaction) => {
+    await transaction.query<Row[]>("select id from users where id = :userId for update", { userId: input.userId });
+    const attemptRows = await transaction.query<Row[]>(
+      "select count(*) as count from training_quiz_attempts where training_job_id = :trainingJobId and user_id = :userId",
+      { trainingJobId: input.trainingJobId, userId: input.userId }
+    );
+    if (Number(attemptRows[0]?.count ?? 0) >= input.maxAttempts) {
+      throw new Error(`已达到最多 ${input.maxAttempts} 次考试限制`);
+    }
+    const sessionRows = await transaction.query<Row[]>(
+      "select * from training_exam_sessions where training_job_id = :trainingJobId and user_id = :userId and status = 'in_progress' order by created_at desc for update",
+      { trainingJobId: input.trainingJobId, userId: input.userId }
+    );
+    const now = new Date();
+    const active = sessionRows.find((row) => new Date(row.expires_at).getTime() > now.getTime());
+    if (active) return { session: trainingExamSessionFromRow(active), created: false };
+    if (sessionRows.length > 0) {
+      await transaction.execute(
+        "update training_exam_sessions set status = 'expired', submitted_at = null where training_job_id = :trainingJobId and user_id = :userId and status = 'in_progress'",
+        { trainingJobId: input.trainingJobId, userId: input.userId }
+      );
+    }
+    const session: TrainingExamSession = {
+      id: createId("training-exam"),
+      training_job_id: input.trainingJobId,
+      user_id: input.userId,
+      question_snapshot: prepareExamQuestions(input.questions),
+      status: "in_progress",
+      started_at: now.toISOString(),
+      expires_at: new Date(now.getTime() + input.timeLimitMinutes * 60_000).toISOString(),
+      submitted_at: null,
+      created_at: now.toISOString()
+    };
+    await transaction.execute(
+      `insert into training_exam_sessions
+        (id, training_job_id, user_id, question_snapshot, status, started_at, expires_at, submitted_at, created_at)
+        values (:id, :training_job_id, :user_id, :question_snapshot, :status, :started_at, :expires_at, :submitted_at, :created_at)`,
+      { ...session, question_snapshot: JSON.stringify(session.question_snapshot) }
+    );
+    return { session, created: true };
+  });
+}
+
+export async function submitTrainingExam(input: {
+  trainingJobId: string;
+  userId: string;
+  sessionId: string;
+  answers: Record<string, string | string[]>;
+  passScore: number;
+  maxAttempts: number;
+  certificateEnabled: boolean;
+  certificateNo: string;
+}) {
+  return mysqlTransaction(async (transaction) => {
+    await transaction.query<Row[]>("select id from users where id = :userId for update", { userId: input.userId });
+    const existingAttempts = await transaction.query<Row[]>(
+      "select * from training_quiz_attempts where session_id = :sessionId and user_id = :userId limit 1 for update",
+      { sessionId: input.sessionId, userId: input.userId }
+    );
+    if (existingAttempts[0]) {
+      const certificateRows = await transaction.query<Row[]>(
+        "select * from training_certificates where training_job_id = :trainingJobId and user_id = :userId limit 1",
+        { trainingJobId: input.trainingJobId, userId: input.userId }
+      );
+      return {
+        attempt: trainingQuizAttemptFromRow(existingAttempts[0]),
+        certificate: certificateRows[0] ? trainingCertificateFromRow(certificateRows[0]) : null,
+        certificateCreated: false
+      };
+    }
+    const sessionRows = await transaction.query<Row[]>(
+      "select * from training_exam_sessions where id = :sessionId and training_job_id = :trainingJobId and user_id = :userId limit 1 for update",
+      { sessionId: input.sessionId, trainingJobId: input.trainingJobId, userId: input.userId }
+    );
+    if (!sessionRows[0] || sessionRows[0].status !== "in_progress") throw new Error("考试会话不存在或已提交");
+    const session = trainingExamSessionFromRow(sessionRows[0]);
+    if (new Date(session.expires_at).getTime() < Date.now()) {
+      await transaction.execute("update training_exam_sessions set status = 'expired', submitted_at = null where id = :sessionId", { sessionId: session.id });
+      return { attempt: null, certificate: null, certificateCreated: false, error: "考试已超时，请重新开始" };
+    }
+    const attemptCountRows = await transaction.query<Row[]>(
+      "select count(*) as count from training_quiz_attempts where training_job_id = :trainingJobId and user_id = :userId",
+      { trainingJobId: input.trainingJobId, userId: input.userId }
+    );
+    const attemptCount = Number(attemptCountRows[0]?.count ?? 0);
+    if (attemptCount >= input.maxAttempts) throw new Error(`已达到最多 ${input.maxAttempts} 次考试限制`);
+    const result = gradeTrainingExam(session.question_snapshot, input.answers, input.passScore);
+    const submittedAt = new Date();
+    const attempt: TrainingQuizAttempt = {
+      id: createId("quiz"),
+      training_job_id: input.trainingJobId,
+      user_id: input.userId,
+      session_id: session.id,
+      answers: input.answers,
+      result_detail: result.result_detail,
+      score: result.score,
+      passed: result.passed,
+      attempt_number: attemptCount + 1,
+      duration_seconds: Math.max(0, Math.round((submittedAt.getTime() - new Date(session.started_at).getTime()) / 1000)),
+      started_at: session.started_at,
+      submitted_at: submittedAt.toISOString(),
+      created_at: submittedAt.toISOString()
+    };
+    await transaction.execute(
+      `insert into training_quiz_attempts
+        (id, training_job_id, user_id, session_id, answers, result_detail, score, passed, attempt_number, duration_seconds, started_at, submitted_at, created_at)
+        values (:id, :training_job_id, :user_id, :session_id, :answers, :result_detail, :score, :passed, :attempt_number, :duration_seconds, :started_at, :submitted_at, :created_at)`,
+      { ...attempt, answers: JSON.stringify(attempt.answers), result_detail: JSON.stringify(attempt.result_detail) }
+    );
+    await transaction.execute(
+      "update training_exam_sessions set status = 'submitted', submitted_at = :submittedAt where id = :sessionId and status = 'in_progress'",
+      { sessionId: session.id, submittedAt: submittedAt.toISOString() }
+    );
+    const certificateRows = await transaction.query<Row[]>(
+      "select * from training_certificates where training_job_id = :trainingJobId and user_id = :userId limit 1 for update",
+      { trainingJobId: input.trainingJobId, userId: input.userId }
+    );
+    let certificate = certificateRows[0] ? trainingCertificateFromRow(certificateRows[0]) : null;
+    let certificateCreated = false;
+    if (attempt.passed && input.certificateEnabled && !certificate) {
+      certificate = {
+        id: createId("training-certificate"),
+        certificate_no: input.certificateNo,
+        training_job_id: input.trainingJobId,
+        user_id: input.userId,
+        quiz_attempt_id: attempt.id,
+        issued_at: submittedAt.toISOString(),
+        revoked_at: null,
+        revoked_by: null,
+        revoke_reason: null,
+        created_at: submittedAt.toISOString()
+      };
+      await transaction.execute(
+        `insert into training_certificates
+          (id, certificate_no, training_job_id, user_id, quiz_attempt_id, issued_at, revoked_at, revoked_by, revoke_reason, created_at)
+          values (:id, :certificate_no, :training_job_id, :user_id, :quiz_attempt_id, :issued_at, :revoked_at, :revoked_by, :revoke_reason, :created_at)`,
+        certificate
+      );
+      certificateCreated = true;
+    }
+    return { attempt, certificate, certificateCreated, error: null };
+  });
 }
 
 export async function listTrainingQuizQuestions(trainingJobId: string, includeDraft = false) {

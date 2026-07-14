@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createServiceTicket, getCurrentUser, listServiceTicketComments, listServiceTicketsByUser } from "@/lib/db";
+import { createServiceTicket, getCurrentUser, getOwnedConversation, getOwnedMessage, listServiceTicketComments, listServiceTicketsByUser } from "@/lib/db";
 import { notifyAdmins } from "@/lib/notification-events";
 import type { ServiceTicketPriority } from "@/lib/types";
 
@@ -43,10 +43,18 @@ export async function POST(request: Request) {
     if (!conversationId || !title || !description) {
       return NextResponse.json({ error: "请提供会话、标题和问题描述" }, { status: 400 });
     }
+    const conversation = await getOwnedConversation(conversationId, user.id);
+    if (!conversation) {
+      return NextResponse.json({ error: "会话不存在或无权提交工单" }, { status: 403 });
+    }
+    const messageId = body.message_id ? String(body.message_id) : null;
+    if (messageId && !await getOwnedMessage(messageId, user.id, conversation.id)) {
+      return NextResponse.json({ error: "关联消息不属于当前会话" }, { status: 403 });
+    }
 
     const ticket = await createServiceTicket({
       conversation_id: conversationId,
-      message_id: body.message_id ? String(body.message_id) : null,
+      message_id: messageId,
       user_id: user.id,
       title: title.slice(0, 120),
       description,

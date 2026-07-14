@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDocument, listDocumentChunks, listDocumentVersionChunks, listDocumentVersions, requireAdmin } from "@/lib/db";
-import type { DocumentChunk, DocumentVersion, DocumentVersionChunk } from "@/lib/types";
+import type { DocumentChunk, DocumentVersionChunk } from "@/lib/types";
 
 type RouteContext = {
   params: Promise<{ id: string; versionId: string }>;

@@ -17,7 +17,7 @@ import {
 import { runDocumentWorkflow, type DocumentWorkflowAction } from "@/lib/document-approval";
 import { removeDocumentSourceFile } from "@/lib/document-storage";
 import { deleteVectorStoreFile } from "@/lib/openai-rag";
-import type { DocumentPublishStatus, DocumentSecurityLevel } from "@/lib/types";
+import type { DocumentSecurityLevel } from "@/lib/types";
 
 type RouteContext = {
   params: Promise<{ id: string }>;

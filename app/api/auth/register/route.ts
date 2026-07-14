@@ -1,12 +1,23 @@
 import { NextResponse } from "next/server";
-import { createSessionToken, sessionCookieName, sessionMaxAgeSeconds } from "@/lib/auth-session";
-import { isMySqlDatabase } from "@/lib/config";
+import { authCookieOptions, createSessionToken, sessionCookieName } from "@/lib/auth-session";
+import { env, isMySqlDatabase } from "@/lib/config";
 import { createUser } from "@/lib/db";
+import { consumeRateLimit, getRequestIp } from "@/lib/request-security";
 
 export async function POST(request: Request) {
   try {
     if (!isMySqlDatabase()) {
       return NextResponse.json({ error: "当前仅 MySQL 模式支持自定义注册" }, { status: 400 });
+    }
+    if (!env.allowSelfRegistration) {
+      return NextResponse.json({ error: "系统已关闭员工自助注册，请联系管理员开通账号" }, { status: 403 });
+    }
+    const rateLimit = consumeRateLimit(`register:ip:${getRequestIp(request)}`, { limit: 5, windowMs: 60 * 60_000 });
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        { error: "注册请求过于频繁，请稍后再试" },
+        { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds) } }
+      );
     }
 
     const body = await request.json();
@@ -35,13 +46,7 @@ export async function POST(request: Request) {
     });
     const token = await createSessionToken(user.id);
     const response = NextResponse.json({ user });
-    response.cookies.set(sessionCookieName, token, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      maxAge: sessionMaxAgeSeconds(),
-      path: "/"
-    });
+    response.cookies.set(sessionCookieName, token, authCookieOptions());
 
     return response;
   } catch (error) {

@@ -248,7 +248,6 @@ export async function searchLocalTextRag(input: {
 }) {
   const knowledgeBaseIds = new Set(input.knowledgeBases.map((kb) => kb.id));
   const allowedDocumentIds = input.allowedDocumentIds ? new Set(input.allowedDocumentIds) : null;
-  const profile = buildQueryProfile(input.question);
   const chunks = await listDocumentChunksByScope({
     knowledgeBaseIds: [...knowledgeBaseIds],
     documentIds: allowedDocumentIds ? [...allowedDocumentIds] : undefined

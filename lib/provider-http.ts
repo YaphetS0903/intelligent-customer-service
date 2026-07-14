@@ -57,7 +57,7 @@ function normalizeTemplateJson(value: string) {
 }
 
 function replaceVariables(value: string, variables: Record<string, unknown>) {
-  return value.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match, key: string) => {
+  return value.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key: string) => {
     const variable = variables[key];
 
     if (variable === null || variable === undefined) {

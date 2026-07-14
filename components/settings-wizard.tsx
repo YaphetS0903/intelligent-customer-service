@@ -154,6 +154,7 @@ const emptySettings: EditableEnvSettings = {
   MYSQL_USER: "",
   MYSQL_PASSWORD: "",
   AUTH_SECRET: "",
+  ALLOW_SELF_REGISTRATION: "false",
   APP_BASE_URL: "http://localhost:3000",
   MAX_UPLOAD_MB: "20"
 };
@@ -622,12 +623,17 @@ const configGroups: Array<{
   },
   {
     title: "应用参数",
-    description: "用于本地地址和上传限制。",
+    description: "用于访问地址、账号注册和上传限制。",
     fields: [
       {
         key: "APP_BASE_URL",
         label: "应用地址",
         placeholder: "http://localhost:3000"
+      },
+      {
+        key: "ALLOW_SELF_REGISTRATION",
+        label: "开放员工自助注册",
+        placeholder: "false"
       },
       {
         key: "MAX_UPLOAD_MB",
@@ -971,7 +977,6 @@ export function SettingsWizard() {
   const { pushToast } = useToast();
   const [health, setHealth] = useState<SystemHealth | null>(null);
   const [settings, setSettings] = useState<EditableEnvSettings>(emptySettings);
-  const [envPath, setEnvPath] = useState("");
   const [loading, setLoading] = useState(true);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -1057,7 +1062,6 @@ export function SettingsWizard() {
       }
 
       setSettings(data.envFile.settings);
-      setEnvPath(data.envFile.path);
       setSettingsLoaded(true);
     } catch (loadError) {
       setSettingsLoadError(loadError instanceof Error ? loadError.message : "读取配置失败");
@@ -1127,7 +1131,6 @@ export function SettingsWizard() {
       }
 
       setSettings(data.envFile.settings);
-      setEnvPath(data.envFile.path);
       pushToast({
         tone: "success",
         title: "配置已保存",

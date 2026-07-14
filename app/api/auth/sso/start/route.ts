@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { isMySqlDatabase } from "@/lib/config";
 import { buildSsoAuthorizeUrl, createSsoState, isSsoEnabled, ssoNextCookieName, ssoStateCookieName } from "@/lib/sso";
+import { authCookieOptions } from "@/lib/auth-session";
+import { safeInternalPath } from "@/lib/safe-navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -20,20 +22,8 @@ export async function GET(request: Request) {
     const authorizeUrl = buildSsoAuthorizeUrl(state);
     const response = NextResponse.redirect(authorizeUrl);
 
-    response.cookies.set(ssoStateCookieName, state, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      maxAge: 600,
-      path: "/"
-    });
-    response.cookies.set(ssoNextCookieName, next, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      maxAge: 600,
-      path: "/"
-    });
+    response.cookies.set(ssoStateCookieName, state, authCookieOptions(600));
+    response.cookies.set(ssoNextCookieName, next, authCookieOptions(600));
 
     return response;
   } catch {
@@ -42,9 +32,5 @@ export async function GET(request: Request) {
 }
 
 function sanitizeNext(value: string | null) {
-  if (!value || !value.startsWith("/") || value.startsWith("//")) {
-    return "/";
-  }
-
-  return value;
+  return safeInternalPath(value);
 }

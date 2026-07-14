@@ -83,6 +83,7 @@ export const editableEnvKeys = [
   "MYSQL_USER",
   "MYSQL_PASSWORD",
   "AUTH_SECRET",
+  "ALLOW_SELF_REGISTRATION",
   "APP_BASE_URL",
   "MAX_UPLOAD_MB"
 ] as const;
@@ -170,6 +171,7 @@ const defaultSettings: EditableEnvSettings = {
   MYSQL_USER: "",
   MYSQL_PASSWORD: "",
   AUTH_SECRET: "",
+  ALLOW_SELF_REGISTRATION: "false",
   APP_BASE_URL: "http://localhost:3000",
   MAX_UPLOAD_MB: "20"
 };
@@ -290,6 +292,7 @@ function envSnapshot(): EditableEnvSettings {
     MYSQL_USER: env.mysqlUser,
     MYSQL_PASSWORD: env.mysqlPassword,
     AUTH_SECRET: process.env.AUTH_SECRET ?? "",
+    ALLOW_SELF_REGISTRATION: String(env.allowSelfRegistration),
     APP_BASE_URL: env.appBaseUrl,
     MAX_UPLOAD_MB: String(env.maxUploadMb)
   };
@@ -330,6 +333,10 @@ function assertSafeValue(key: EditableEnvKey, value: string) {
     if (!Number.isFinite(size) || size <= 0 || size > 200) {
       throw new Error("MAX_UPLOAD_MB 必须是 1-200 之间的数字");
     }
+  }
+
+  if (key === "ALLOW_SELF_REGISTRATION" && !["true", "false"].includes(value)) {
+    throw new Error("ALLOW_SELF_REGISTRATION 只能是 true 或 false");
   }
 
   if (key === "AI_CHAT_PROVIDER" && value && !["openai", "custom"].includes(value)) {

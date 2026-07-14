@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Building2, Loader2, LogIn, UserPlus } from "lucide-react";
+import { safePostLoginPath } from "@/lib/safe-navigation";
 
 type Mode = "login" | "signup";
 
@@ -16,6 +17,7 @@ export function AuthPanel() {
   const [department, setDepartment] = useState("");
   const [loading, setLoading] = useState(false);
   const [ssoEnabled, setSsoEnabled] = useState(false);
+  const [selfRegistrationEnabled, setSelfRegistrationEnabled] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -26,8 +28,14 @@ export function AuthPanel() {
 
     void fetch("/api/auth/sso/status", { cache: "no-store" })
       .then((response) => response.json())
-      .then((data) => setSsoEnabled(Boolean(data.enabled)))
-      .catch(() => setSsoEnabled(false));
+      .then((data) => {
+        setSsoEnabled(Boolean(data.enabled));
+        setSelfRegistrationEnabled(Boolean(data.selfRegistrationEnabled));
+      })
+      .catch(() => {
+        setSsoEnabled(false);
+        setSelfRegistrationEnabled(false);
+      });
   }, [searchParams]);
 
   async function submit() {
@@ -61,7 +69,7 @@ export function AuthPanel() {
       }
 
       await fetch("/api/auth/me");
-      const next = searchParams.get("next") || "/";
+      const next = safePostLoginPath(searchParams.get("next"), data.user?.role === "admin");
       router.replace(next);
       router.refresh();
     } catch (error) {
@@ -172,15 +180,17 @@ export function AuthPanel() {
         </button>
       )}
 
-      <button
-        onClick={() => {
-          setMode(mode === "login" ? "signup" : "login");
-          setMessage(null);
-        }}
-        className="mt-4 w-full text-center text-sm font-medium text-brand hover:text-brand"
-      >
-        {mode === "login" ? "没有账号？注册一个" : "已有账号？返回登录"}
-      </button>
+      {(selfRegistrationEnabled || mode === "signup") && (
+        <button
+          onClick={() => {
+            setMode(mode === "login" ? "signup" : "login");
+            setMessage(null);
+          }}
+          className="mt-4 w-full text-center text-sm font-medium text-brand hover:text-brand"
+        >
+          {mode === "login" ? "没有账号？注册一个" : "已有账号？返回登录"}
+        </button>
+      )}
     </div>
   );
 }

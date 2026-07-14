@@ -6,6 +6,7 @@ import { createId, demoUser, memoryStore } from "@/lib/mock-store";
 import * as mysqlDb from "@/lib/mysql-db";
 import { createConversationTitleFromMessage, isDefaultConversationTitle } from "@/lib/conversation-title";
 import { calculateTicketDueAt, isTicketClosedStatus, resolveTicketResolvedAt } from "@/lib/service-ticket-rules";
+import { gradeTrainingExam, prepareExamQuestions } from "@/lib/training-quiz";
 import type {
   AppNotification,
   Conversation,
@@ -34,7 +35,6 @@ import type {
   SecurityEvent,
   ServiceTicket,
   ServiceTicketComment,
-  ServiceTicketPriority,
   TrainingJob,
   TrainingAuditEvent,
   TrainingProgress,
@@ -54,14 +54,6 @@ export async function getCurrentUser(): Promise<UserProfile> {
 
     if (!session) {
       throw new Error("请先登录");
-    }
-
-    const defaultAdminFallback = getDefaultMySqlAdminFallback(session.userId);
-    if (defaultAdminFallback) {
-      return withDefaultAdminFallback(
-        mysqlDb.getCurrentUser(session.userId),
-        defaultAdminFallback
-      );
     }
 
     return mysqlDb.getCurrentUser(session.userId);
@@ -151,45 +143,6 @@ export async function getCurrentUser(): Promise<UserProfile> {
   }
 
   return data;
-}
-
-function getDefaultMySqlAdminFallback(userId: string): UserProfile | null {
-  if (userId !== "admin-tianrui") {
-    return null;
-  }
-
-  return {
-    ...demoUser,
-    id: "admin-tianrui",
-    email: "admin@tianrui.local",
-    name: "系统管理员",
-    role: "admin",
-    auth_provider: null,
-    external_subject: null
-  };
-}
-
-async function withDefaultAdminFallback(userPromise: Promise<UserProfile>, fallback: UserProfile) {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-
-  try {
-    return await Promise.race([
-      userPromise,
-      new Promise<UserProfile>((resolve) => {
-        timer = setTimeout(() => {
-          console.warn("[auth:mysql] default admin lookup timed out, using signed session fallback");
-          resolve(fallback);
-        }, 2500);
-      })
-    ]);
-  } catch (error) {
-    console.warn("[auth:mysql] default admin lookup failed, using signed session fallback", error);
-    return fallback;
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  }
 }
 
 export async function getCurrentUserOrNull(): Promise<UserProfile | null> {
@@ -1584,6 +1537,10 @@ export async function deleteDocumentPermissionTemplate(id: string): Promise<void
 }
 
 function matchesConversationArchiveFilter(conversation: Conversation, filter: ConversationArchiveFilter) {
+  if (conversation.deleted_at) {
+    return false;
+  }
+
   if (filter === "all") {
     return true;
   }
@@ -1641,7 +1598,8 @@ export async function listConversations(
   let query = supabase
     .from("conversations")
     .select("*")
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    .is("deleted_at", null);
 
   if (filter === "active") {
     query = query.is("archived_at", null);
@@ -1721,7 +1679,7 @@ export async function upsertConversation(title: string, conversationId?: string)
   const supabase = createSupabaseAdminClient();
 
   if (conversationId) {
-    const existing = memoryStore.conversations.find((item) => item.id === conversationId);
+    const existing = memoryStore.conversations.find((item) => item.id === conversationId && !item.deleted_at);
     if (existing) {
       if (isDefaultConversationTitle(existing.title) && !isDefaultConversationTitle(normalizedTitle)) {
         existing.title = normalizedTitle;
@@ -1753,10 +1711,12 @@ export async function upsertConversation(title: string, conversationId?: string)
             ...(shouldUpdateTitle ? { title: normalizedTitle } : {}),
             archived_at: null,
             pinned_at: null,
+            deleted_at: null,
             updated_at: now
           })
           .eq("id", conversationId)
           .eq("user_id", user.id)
+          .is("deleted_at", null)
           .select("*")
           .maybeSingle();
 
@@ -1771,9 +1731,10 @@ export async function upsertConversation(title: string, conversationId?: string)
 
       const { data, error } = await supabase
         .from("conversations")
-        .update({ archived_at: null, pinned_at: null, updated_at: now })
+        .update({ archived_at: null, pinned_at: null, deleted_at: null, updated_at: now })
         .eq("id", conversationId)
         .eq("user_id", user.id)
+        .is("deleted_at", null)
         .select("*")
         .maybeSingle();
 
@@ -1793,6 +1754,7 @@ export async function upsertConversation(title: string, conversationId?: string)
     title: normalizedTitle,
     archived_at: null,
     pinned_at: null,
+    deleted_at: null,
     created_at: now,
     updated_at: now
   };
@@ -1825,7 +1787,7 @@ export async function archiveConversation(
 
   if (!supabase) {
     const existing = memoryStore.conversations.find(
-      (item) => item.id === conversationId && item.user_id === user.id
+      (item) => item.id === conversationId && item.user_id === user.id && !item.deleted_at
     );
 
     if (!existing) {
@@ -1849,6 +1811,7 @@ export async function archiveConversation(
     .update(updateInput)
     .eq("id", conversationId)
     .eq("user_id", user.id)
+    .is("deleted_at", null)
     .select("*")
     .maybeSingle();
 
@@ -1873,7 +1836,7 @@ export async function pinConversation(
 
   if (!supabase) {
     const existing = memoryStore.conversations.find(
-      (item) => item.id === conversationId && item.user_id === user.id && !item.archived_at
+      (item) => item.id === conversationId && item.user_id === user.id && !item.archived_at && !item.deleted_at
     );
 
     if (!existing) {
@@ -1890,6 +1853,7 @@ export async function pinConversation(
     .eq("id", conversationId)
     .eq("user_id", user.id)
     .is("archived_at", null)
+    .is("deleted_at", null)
     .select("*")
     .maybeSingle();
 
@@ -1911,7 +1875,7 @@ export async function renameConversation(conversationId: string, title: string):
 
   if (!supabase) {
     const existing = memoryStore.conversations.find(
-      (item) => item.id === conversationId && item.user_id === user.id
+      (item) => item.id === conversationId && item.user_id === user.id && !item.deleted_at
     );
 
     if (!existing) {
@@ -1928,6 +1892,7 @@ export async function renameConversation(conversationId: string, title: string):
     .update({ title, updated_at: now })
     .eq("id", conversationId)
     .eq("user_id", user.id)
+    .is("deleted_at", null)
     .select("*")
     .maybeSingle();
 
@@ -1948,32 +1913,16 @@ export async function deleteArchivedConversation(conversationId: string): Promis
 
   if (!supabase) {
     const conversation = memoryStore.conversations.find(
-      (item) => item.id === conversationId && item.user_id === user.id && item.archived_at
+      (item) => item.id === conversationId && item.user_id === user.id && item.archived_at && !item.deleted_at
     );
 
     if (!conversation) {
       return false;
     }
 
-    const messageIds = new Set(
-      memoryStore.messages
-        .filter((message) => message.conversation_id === conversationId)
-        .map((message) => message.id)
-    );
-    const ticketIds = new Set(
-      memoryStore.serviceTickets
-        .filter((ticket) => ticket.conversation_id === conversationId)
-        .map((ticket) => ticket.id)
-    );
-
-    memoryStore.feedback = memoryStore.feedback.filter((item) => !messageIds.has(item.message_id));
-    memoryStore.serviceTicketComments = memoryStore.serviceTicketComments.filter((item) => !ticketIds.has(item.ticket_id));
-    memoryStore.serviceTickets = memoryStore.serviceTickets.filter((item) => item.conversation_id !== conversationId);
-    memoryStore.knowledgeTasks = memoryStore.knowledgeTasks.filter((item) => item.conversation_id !== conversationId);
-    memoryStore.securityEvents = memoryStore.securityEvents.filter((item) => item.conversation_id !== conversationId);
-    memoryStore.modelUsageEvents = memoryStore.modelUsageEvents.filter((item) => item.conversation_id !== conversationId);
-    memoryStore.messages = memoryStore.messages.filter((item) => item.conversation_id !== conversationId);
-    memoryStore.conversations = memoryStore.conversations.filter((item) => item.id !== conversationId);
+    conversation.deleted_at = new Date().toISOString();
+    conversation.pinned_at = null;
+    conversation.updated_at = conversation.deleted_at;
     return true;
   }
 
@@ -1983,6 +1932,7 @@ export async function deleteArchivedConversation(conversationId: string): Promis
     .eq("id", conversationId)
     .eq("user_id", user.id)
     .not("archived_at", "is", null)
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (conversationError) {
@@ -1993,52 +1943,13 @@ export async function deleteArchivedConversation(conversationId: string): Promis
     return false;
   }
 
-  const { data: messages, error: messagesError } = await supabase
-    .from("messages")
-    .select("id")
-    .eq("conversation_id", conversationId);
-
-  if (messagesError) {
-    throw new Error(messagesError.message);
-  }
-
-  const messageIds = (messages ?? []).map((message) => message.id);
-
-  if (messageIds.length > 0) {
-    const { error } = await supabase.from("feedback").delete().in("message_id", messageIds);
-    if (error) {
-      throw new Error(error.message);
-    }
-  }
-
-  const { data: tickets, error: ticketsError } = await supabase
-    .from("service_tickets")
-    .select("id")
-    .eq("conversation_id", conversationId);
-
-  if (ticketsError) {
-    throw new Error(ticketsError.message);
-  }
-
-  const ticketIds = (tickets ?? []).map((ticket) => ticket.id);
-
-  if (ticketIds.length > 0) {
-    const { error } = await supabase.from("service_ticket_comments").delete().in("ticket_id", ticketIds);
-    if (error) {
-      throw new Error(error.message);
-    }
-  }
-
-  await supabase.from("service_tickets").delete().eq("conversation_id", conversationId);
-  await supabase.from("knowledge_tasks").delete().eq("conversation_id", conversationId);
-  await supabase.from("security_events").delete().eq("conversation_id", conversationId);
-  await supabase.from("messages").delete().eq("conversation_id", conversationId);
-
+  const deletedAt = new Date().toISOString();
   const { error: deleteError } = await supabase
     .from("conversations")
-    .delete()
+    .update({ deleted_at: deletedAt, pinned_at: null, updated_at: deletedAt })
     .eq("id", conversationId)
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .is("deleted_at", null);
 
   if (deleteError) {
     throw new Error(deleteError.message);
@@ -2068,6 +1979,54 @@ export async function listMessages(conversationId: string): Promise<Message[]> {
   }
 
   return data ?? [];
+}
+
+export async function getOwnedConversation(conversationId: string, userId: string): Promise<Conversation | null> {
+  if (isMySqlDatabase()) return mysqlDb.getOwnedConversation(conversationId, userId);
+  const supabase = createSupabaseAdminClient();
+  if (!supabase) {
+    return memoryStore.conversations.find(
+      (conversation) => conversation.id === conversationId && conversation.user_id === userId && !conversation.deleted_at
+    ) ?? null;
+  }
+  const { data, error } = await supabase
+    .from("conversations")
+    .select("*")
+    .eq("id", conversationId)
+    .eq("user_id", userId)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ?? null;
+}
+
+export async function getOwnedMessage(messageId: string, userId: string, conversationId?: string): Promise<Message | null> {
+  if (isMySqlDatabase()) return mysqlDb.getOwnedMessage(messageId, userId, conversationId);
+  const conversation = conversationId
+    ? await getOwnedConversation(conversationId, userId)
+    : null;
+  if (conversationId && !conversation) return null;
+  const supabase = createSupabaseAdminClient();
+  if (!supabase) {
+    const ownedConversationIds = new Set(
+      memoryStore.conversations
+        .filter((item) => item.user_id === userId && !item.deleted_at)
+        .map((item) => item.id)
+    );
+    return memoryStore.messages.find(
+      (message) => message.id === messageId && ownedConversationIds.has(message.conversation_id) && (!conversationId || message.conversation_id === conversationId)
+    ) ?? null;
+  }
+  const { data: message, error } = await supabase
+    .from("messages")
+    .select("*")
+    .eq("id", messageId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!message) return null;
+  return await getOwnedConversation(message.conversation_id, userId) && (!conversationId || message.conversation_id === conversationId)
+    ? message
+    : null;
 }
 
 export async function listAllMessages(): Promise<Message[]> {
@@ -2271,11 +2230,43 @@ export async function createFeedback(
 
   const supabase = createSupabaseAdminClient();
   if (!supabase) {
+    const existingIndex = memoryStore.feedback.findIndex(
+      (item) => item.message_id === input.message_id && item.user_id === input.user_id
+    );
+    if (existingIndex >= 0) {
+      memoryStore.feedback[existingIndex] = {
+        ...memoryStore.feedback[existingIndex],
+        rating: input.rating,
+        comment: input.comment,
+        status: "pending",
+        resolution_note: null,
+        needs_knowledge_update: input.rating === "dislike"
+      };
+      return memoryStore.feedback[existingIndex];
+    }
     memoryStore.feedback.unshift(record);
     return record;
   }
 
-  const { data, error } = await supabase.from("feedback").insert(record).select("*").single();
+  const { data: existing, error: existingError } = await supabase
+    .from("feedback")
+    .select("id")
+    .eq("message_id", input.message_id)
+    .eq("user_id", input.user_id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (existingError) throw new Error(existingError.message);
+  const operation = existing
+    ? supabase.from("feedback").update({
+        rating: input.rating,
+        comment: input.comment,
+        status: "pending",
+        resolution_note: null,
+        needs_knowledge_update: input.rating === "dislike"
+      }).eq("id", existing.id)
+    : supabase.from("feedback").insert(record);
+  const { data, error } = await operation.select("*").single();
   if (error) {
     throw new Error(error.message);
   }
@@ -3498,6 +3489,115 @@ export async function createTrainingQuizAttempt(input: Omit<TrainingQuizAttempt,
   }
 
   return data;
+}
+
+const trainingExamLocks = new Map<string, Promise<void>>();
+
+export async function startTrainingExam(input: {
+  trainingJobId: string;
+  userId: string;
+  questions: TrainingQuizQuestion[];
+  maxAttempts: number;
+  timeLimitMinutes: number;
+}) {
+  if (isMySqlDatabase()) return mysqlDb.startTrainingExam(input);
+  return withTrainingExamLock(`${input.trainingJobId}:${input.userId}`, async () => {
+    const attempts = await listTrainingQuizAttempts(input.trainingJobId, input.userId);
+    if (attempts.length >= input.maxAttempts) throw new Error(`已达到最多 ${input.maxAttempts} 次考试限制`);
+    const existing = await getActiveTrainingExamSession(input.trainingJobId, input.userId);
+    if (existing && new Date(existing.expires_at).getTime() > Date.now()) return { session: existing, created: false };
+    if (existing) await updateTrainingExamSession(existing.id, { status: "expired", submitted_at: null });
+    const startedAt = new Date();
+    const session = await createTrainingExamSession({
+      training_job_id: input.trainingJobId,
+      user_id: input.userId,
+      question_snapshot: prepareExamQuestions(input.questions),
+      status: "in_progress",
+      started_at: startedAt.toISOString(),
+      expires_at: new Date(startedAt.getTime() + input.timeLimitMinutes * 60_000).toISOString(),
+      submitted_at: null
+    });
+    return { session, created: true };
+  });
+}
+
+export async function submitTrainingExam(input: {
+  trainingJobId: string;
+  userId: string;
+  sessionId: string;
+  answers: Record<string, string | string[]>;
+  passScore: number;
+  maxAttempts: number;
+  certificateEnabled: boolean;
+  certificateNo: string;
+}) {
+  if (isMySqlDatabase()) return mysqlDb.submitTrainingExam(input);
+  return withTrainingExamLock(`${input.trainingJobId}:${input.userId}`, async () => {
+    const attempts = await listTrainingQuizAttempts(input.trainingJobId, input.userId);
+    const existingAttempt = attempts.find((attempt) => attempt.session_id === input.sessionId);
+    if (existingAttempt) {
+      return {
+        attempt: existingAttempt,
+        certificate: await getTrainingCertificate(input.trainingJobId, input.userId),
+        certificateCreated: false,
+        error: null
+      };
+    }
+    if (attempts.length >= input.maxAttempts) throw new Error(`已达到最多 ${input.maxAttempts} 次考试限制`);
+    const session = await getActiveTrainingExamSession(input.trainingJobId, input.userId);
+    if (!session || session.id !== input.sessionId) throw new Error("考试会话不存在或已提交");
+    if (new Date(session.expires_at).getTime() < Date.now()) {
+      await updateTrainingExamSession(session.id, { status: "expired", submitted_at: null });
+      return { attempt: null, certificate: null, certificateCreated: false, error: "考试已超时，请重新开始" };
+    }
+    const result = gradeTrainingExam(session.question_snapshot, input.answers, input.passScore);
+    const submittedAt = new Date();
+    const attempt = await createTrainingQuizAttempt({
+      training_job_id: input.trainingJobId,
+      user_id: input.userId,
+      session_id: session.id,
+      answers: input.answers,
+      result_detail: result.result_detail,
+      score: result.score,
+      passed: result.passed,
+      attempt_number: attempts.length + 1,
+      duration_seconds: Math.max(0, Math.round((submittedAt.getTime() - new Date(session.started_at).getTime()) / 1000)),
+      started_at: session.started_at,
+      submitted_at: submittedAt.toISOString()
+    });
+    await updateTrainingExamSession(session.id, { status: "submitted", submitted_at: submittedAt.toISOString() });
+    let certificate = await getTrainingCertificate(input.trainingJobId, input.userId);
+    let certificateCreated = false;
+    if (attempt.passed && input.certificateEnabled && !certificate) {
+      certificate = await createTrainingCertificate({
+        certificate_no: input.certificateNo,
+        training_job_id: input.trainingJobId,
+        user_id: input.userId,
+        quiz_attempt_id: attempt.id,
+        issued_at: submittedAt.toISOString(),
+        revoked_at: null,
+        revoked_by: null,
+        revoke_reason: null
+      });
+      certificateCreated = true;
+    }
+    return { attempt, certificate, certificateCreated, error: null };
+  });
+}
+
+async function withTrainingExamLock<T>(key: string, operation: () => Promise<T>) {
+  const previous = trainingExamLocks.get(key) ?? Promise.resolve();
+  let release: () => void = () => undefined;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  const queued = previous.then(() => current);
+  trainingExamLocks.set(key, queued);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (trainingExamLocks.get(key) === queued) trainingExamLocks.delete(key);
+  }
 }
 
 export async function listTrainingQuizQuestions(trainingJobId: string, includeDraft = false): Promise<TrainingQuizQuestion[]> {

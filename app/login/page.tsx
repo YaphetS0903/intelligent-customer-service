@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { Activity, Database, Gauge, ShieldCheck } from "lucide-react";
+import { Activity } from "lucide-react";
 import { AuthPanel } from "@/components/auth-panel";
 
 export default function LoginPage() {
@@ -27,24 +27,6 @@ export default function LoginPage() {
               </p>
             </div>
 
-            <div className="mt-10 grid max-w-3xl grid-cols-3 gap-3">
-              {[
-                { label: "知识库在线", value: "2", icon: Database },
-                { label: "可用资料", value: "8", icon: ShieldCheck },
-                { label: "QA 验证", value: "100%", icon: Gauge }
-              ].map((item) => {
-                const Icon = item.icon;
-                return (
-                  <div key={item.label} className="rounded-lg border border-line bg-white/90 p-4 shadow-panel">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-xs font-medium text-muted">{item.label}</p>
-                      <Icon size={17} className="text-brand" />
-                    </div>
-                    <p className="mt-3 text-3xl font-semibold text-ink">{item.value}</p>
-                  </div>
-                );
-              })}
-            </div>
           </div>
 
           <div className="max-w-3xl rounded-lg border border-line bg-white/90 p-5 shadow-panel">

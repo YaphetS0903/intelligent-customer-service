@@ -105,6 +105,7 @@ export const memoryStore: MemoryStore = globalThis.__enterpriseAiSupportMemorySt
       title: "新员工常见问题",
       archived_at: null,
       pinned_at: null,
+      deleted_at: null,
       created_at: now,
       updated_at: now
     }

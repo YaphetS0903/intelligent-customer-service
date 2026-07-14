@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
-import { createSessionToken, sessionCookieName, sessionMaxAgeSeconds } from "@/lib/auth-session";
-import { env, isMySqlDatabase } from "@/lib/config";
+import { authCookieOptions, createSessionToken, sessionCookieName } from "@/lib/auth-session";
+import { isMySqlDatabase } from "@/lib/config";
+import { createSecurityEvent } from "@/lib/db";
 import { authenticateLdapUser, isLdapEnabled } from "@/lib/ldap";
 import { ensureDefaultAdmin, getUserAuthByEmail, markUserLoggedIn, upsertExternalUser } from "@/lib/mysql-db";
 import { verifyPassword } from "@/lib/password";
+import { checkRateLimit, clearRateLimit, consumeRateLimit, getRequestIp } from "@/lib/request-security";
 import type { UserProfile } from "@/lib/types";
 
 export async function POST(request: Request) {
@@ -22,10 +24,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "请输入邮箱和密码" }, { status: 400 });
     }
 
+    const ip = getRequestIp(request);
+    const requestLimit = consumeRateLimit(`login:request:${ip}`, { limit: 120, windowMs: 15 * 60_000, blockMs: 15 * 60_000 });
+    if (!requestLimit.allowed) return rateLimitedResponse(requestLimit.retryAfterSeconds);
+    const accountLimit = checkRateLimit(`login:failure:${email}`);
+    if (!accountLimit.allowed) return rateLimitedResponse(accountLimit.retryAfterSeconds);
+
     const auth = await getUserAuthByEmail(email);
     const localPasswordOk = Boolean(auth && auth.password_hash && await verifyPassword(password, auth.password_hash));
 
     if (localPasswordOk && auth) {
+      clearRateLimit(`login:failure:${email}`);
       return createLoginResponse(auth.user);
     }
 
@@ -45,10 +54,18 @@ export async function POST(request: Request) {
           subject: ldapUser.subject
         });
 
+        clearRateLimit(`login:failure:${email}`);
         return createLoginResponse(user);
       }
     }
 
+    const failureLimit = consumeRateLimit(`login:failure:${email}`, { limit: 5, windowMs: 15 * 60_000, blockMs: 15 * 60_000 });
+    if (!failureLimit.allowed) {
+      if (failureLimit.blockedNow) {
+        void recordLoginLockout(email, ip);
+      }
+      return rateLimitedResponse(failureLimit.retryAfterSeconds);
+    }
     return NextResponse.json({ error: "邮箱或密码不正确" }, { status: 401 });
   } catch (error) {
     return NextResponse.json(
@@ -66,13 +83,29 @@ async function createLoginResponse(user: UserProfile) {
   await markUserLoggedIn(user.id);
   const token = await createSessionToken(user.id);
   const response = NextResponse.json({ user });
-  response.cookies.set(sessionCookieName, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: env.appBaseUrl.startsWith("https://"),
-    maxAge: sessionMaxAgeSeconds(),
-    path: "/"
-  });
+  response.cookies.set(sessionCookieName, token, authCookieOptions());
 
   return response;
+}
+
+function rateLimitedResponse(retryAfterSeconds: number) {
+  return NextResponse.json(
+    { error: "登录尝试过于频繁，请稍后再试" },
+    { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } }
+  );
+}
+
+async function recordLoginLockout(email: string, ip: string) {
+  await createSecurityEvent({
+    category: "abnormal_access",
+    severity: "high",
+    user_id: null,
+    conversation_id: null,
+    message_id: null,
+    title: "账号连续登录失败",
+    detail: "同一账号在短时间内连续登录失败，系统已临时限制后续尝试。",
+    raw_excerpt: null,
+    masked_excerpt: null,
+    metadata: { detector: "login_failure_lockout", email, ip }
+  }).catch((error) => console.warn("Failed to record login lockout", error));
 }

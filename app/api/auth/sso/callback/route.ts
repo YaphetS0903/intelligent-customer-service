@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { createSessionToken, sessionCookieName, sessionMaxAgeSeconds } from "@/lib/auth-session";
+import { authCookieOptions, createSessionToken, sessionCookieName } from "@/lib/auth-session";
 import { upsertExternalUser } from "@/lib/db";
 import { markUserLoggedIn } from "@/lib/mysql-db";
 import {
@@ -9,6 +9,7 @@ import {
   ssoNextCookieName,
   ssoStateCookieName
 } from "@/lib/sso";
+import { safePostLoginPath } from "@/lib/safe-navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ export async function GET(request: Request) {
 
     const cookieStore = await cookies();
     const expectedState = cookieStore.get(ssoStateCookieName)?.value;
-    const next = sanitizeNext(cookieStore.get(ssoNextCookieName)?.value ?? "/");
+    const requestedNext = cookieStore.get(ssoNextCookieName)?.value ?? "/";
 
     if (!expectedState || expectedState !== state) {
       throw new Error("统一登录 state 校验失败，请重新登录。");
@@ -45,6 +46,7 @@ export async function GET(request: Request) {
       provider: "oidc",
       subject: ssoUser.subject
     });
+    const next = safePostLoginPath(requestedNext, user.role === "admin");
 
     if (user.status === "disabled") {
       throw new Error("账号已被禁用，请联系管理员。");
@@ -54,27 +56,9 @@ export async function GET(request: Request) {
 
     const token = await createSessionToken(user.id);
     const response = NextResponse.redirect(new URL(next, requestUrl.origin));
-    response.cookies.set(sessionCookieName, token, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      maxAge: sessionMaxAgeSeconds(),
-      path: "/"
-    });
-    response.cookies.set(ssoStateCookieName, "", {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      maxAge: 0,
-      path: "/"
-    });
-    response.cookies.set(ssoNextCookieName, "", {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      maxAge: 0,
-      path: "/"
-    });
+    response.cookies.set(sessionCookieName, token, authCookieOptions());
+    response.cookies.set(ssoStateCookieName, "", authCookieOptions(0));
+    response.cookies.set(ssoNextCookieName, "", authCookieOptions(0));
 
     return response;
   } catch (callbackError) {
@@ -82,12 +66,4 @@ export async function GET(request: Request) {
     loginUrl.searchParams.set("error", callbackError instanceof Error ? callbackError.message : "统一登录失败");
     return NextResponse.redirect(loginUrl);
   }
-}
-
-function sanitizeNext(value: string) {
-  if (!value || !value.startsWith("/") || value.startsWith("//")) {
-    return "/";
-  }
-
-  return value;
 }

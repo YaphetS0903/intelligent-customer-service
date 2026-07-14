@@ -14,10 +14,7 @@ const parser = new XMLParser({
 });
 
 const textLikeTypes = new Set(["text/plain", "text/markdown"]);
-const excelTypes = new Set([
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-excel"
-]);
+const excelTypes = new Set(["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]);
 const imageExtensions = [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"];
 
 type ExtractedTextSection = {
@@ -76,7 +73,11 @@ export async function extractTextFromFile(file: File, options: ExtractTextOption
     return recognizeTextWithOcr(file, options);
   }
 
-  if (excelTypes.has(file.type) || lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls")) {
+  if (lowerName.endsWith(".xls")) {
+    throw new Error("旧版 XLS 暂不支持，请在 Excel 中另存为 XLSX 后重新上传。");
+  }
+
+  if (excelTypes.has(file.type) || lowerName.endsWith(".xlsx")) {
     return extractExcelText(file);
   }
 
@@ -106,7 +107,7 @@ export async function extractTextFromFile(file: File, options: ExtractTextOption
     };
   }
 
-  throw new Error("local_text 模式当前支持 TXT、Markdown、DOCX、PPTX、PDF、XLSX、XLS 和图片 OCR。扫描件 PDF 或图片资料需要先配置 OCR。");
+  throw new Error("local_text 模式当前支持 TXT、Markdown、DOCX、PPTX、PDF、XLSX 和图片 OCR。扫描件 PDF 或图片资料需要先配置 OCR。");
 }
 
 export function isImageFile(file: File, lowerName = file.name.toLowerCase()) {
@@ -482,40 +483,49 @@ async function postOcrJson(file: File) {
 }
 
 async function extractExcelText(file: File): Promise<ExtractedText> {
-  const XLSX = await import("xlsx");
-  const workbook = XLSX.read(await file.arrayBuffer(), {
-    type: "array",
-    cellDates: true
-  });
+  const arrayBuffer = await file.arrayBuffer();
+  const signature = new Uint8Array(arrayBuffer.slice(0, 4));
+  if (signature.length < 4 || signature[0] !== 0x50 || signature[1] !== 0x4b) {
+    throw new Error("Excel 文件格式无效，请确认上传的是正常的 XLSX 文件。");
+  }
+
+  const { default: readExcelFile } = await import("read-excel-file/node");
+  const workbook = await readExcelFile(Buffer.from(arrayBuffer));
+  if (workbook.length > 20) {
+    throw new Error("Excel 工作表不能超过 20 个。");
+  }
   const sections: ExtractedTextSection[] = [];
   const rowsPerSection = 40;
+  let totalCells = 0;
 
-  for (const sheetName of workbook.SheetNames) {
-    const sheet = workbook.Sheets[sheetName];
-    if (!sheet) {
-      continue;
+  for (const sheet of workbook) {
+    if (sheet.data.length > 20_000) {
+      throw new Error(`工作表「${sheet.sheet}」不能超过 20000 行。`);
     }
-
-    const rows = XLSX.utils.sheet_to_json<Array<string | number | boolean | Date | null>>(sheet, {
-      header: 1,
-      blankrows: false,
-      defval: "",
-      raw: false
-    }).filter((row) => row.some((cell) => String(cell ?? "").trim()));
+    const rows = sheet.data
+      .map((row) => row.map(formatExcelCell))
+      .filter((row) => row.some((cell) => cell.trim()));
+    const maxColumns = rows.reduce((maximum, row) => Math.max(maximum, row.length), 0);
+    if (maxColumns > 200) {
+      throw new Error(`工作表「${sheet.sheet}」不能超过 200 列。`);
+    }
+    totalCells += rows.reduce((total, row) => total + row.length, 0);
+    if (totalCells > 200_000) {
+      throw new Error("Excel 有效单元格不能超过 200000 个。");
+    }
 
     if (rows.length === 0) {
       continue;
     }
 
-    const sheetRange = sheet["!ref"];
     for (let start = 0; start < rows.length; start += rowsPerSection) {
       const batch = rows.slice(start, start + rowsPerSection);
       const rowStart = start + 1;
       const rowEnd = start + batch.length;
-      const cellRange = sheetRange ? `${sheetName}!${rowStart}:${rowEnd} / ${sheetRange}` : `${sheetName}!${rowStart}:${rowEnd}`;
-      const title = `${file.name} - ${sheetName} 第 ${rowStart}-${rowEnd} 行`;
+      const cellRange = `${sheet.sheet}!${rowStart}:${rowEnd}`;
+      const title = `${file.name} - ${sheet.sheet} 第 ${rowStart}-${rowEnd} 行`;
       const content = [
-        `工作表：${sheetName}`,
+        `工作表：${sheet.sheet}`,
         `范围：${cellRange}`,
         rowsToMarkdownTable(batch)
       ].join("\n");
@@ -523,8 +533,8 @@ async function extractExcelText(file: File): Promise<ExtractedText> {
       sections.push({
         title,
         content,
-        section: `${sheetName} 第 ${rowStart}-${rowEnd} 行`,
-        sheet: sheetName,
+        section: `${sheet.sheet} 第 ${rowStart}-${rowEnd} 行`,
+        sheet: sheet.sheet,
         cellRange,
         parser: "excel"
       });
@@ -536,6 +546,11 @@ async function extractExcelText(file: File): Promise<ExtractedText> {
     content: sections.map((section) => section.content).join("\n\n"),
     sections
   };
+}
+
+function formatExcelCell(value: unknown) {
+  if (value instanceof Date) return value.toISOString();
+  return value === null ? "" : String(value);
 }
 
 async function extractDocxText(file: File) {
