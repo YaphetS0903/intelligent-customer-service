@@ -2,14 +2,16 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { FileAudio, FileImage, Play } from "lucide-react";
+import { CalendarClock, FileAudio, FileImage, Play } from "lucide-react";
 import { StatusPill } from "@/components/status-pill";
 import { ErrorRetry, PanelSkeleton } from "@/components/ui-feedback";
-import type { TrainingJob, TrainingProgress } from "@/lib/types";
+import type { TrainingCertificate, TrainingJob, TrainingProgress, TrainingQuizAttempt } from "@/lib/types";
 
 export function TrainingList() {
   const [jobs, setJobs] = useState<TrainingJob[]>([]);
   const [progress, setProgress] = useState<TrainingProgress[]>([]);
+  const [quizAttempts, setQuizAttempts] = useState<TrainingQuizAttempt[]>([]);
+  const [certificates, setCertificates] = useState<TrainingCertificate[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -26,6 +28,8 @@ export function TrainingList() {
 
       setJobs(data.trainingJobs ?? []);
       setProgress(data.trainingProgress ?? []);
+      setQuizAttempts(data.quizAttempts ?? []);
+      setCertificates(data.certificates ?? []);
       setLoadError(null);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "培训列表加载失败");
@@ -59,7 +63,7 @@ export function TrainingList() {
       {(!loading || jobs.length > 0) && (!loadError || jobs.length > 0) && (
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {jobs.map((job) => (
-            <TrainingCourseCard key={job.id} job={job} progress={progress.find((item) => item.training_job_id === job.id) ?? null} />
+            <TrainingCourseCard key={job.id} job={job} progress={progress.find((item) => item.training_job_id === job.id) ?? null} passed={quizAttempts.some((item) => item.training_job_id === job.id && item.passed)} certificate={certificates.find((item) => item.training_job_id === job.id && !item.revoked_at) ?? null} />
           ))}
           {jobs.length === 0 && (
             <div className="rounded-lg border border-dashed border-line bg-white p-8 text-center text-sm leading-6 text-slate-500 md:col-span-2 xl:col-span-3">
@@ -83,7 +87,8 @@ function TrainingListSkeleton() {
   );
 }
 
-function TrainingCourseCard({ job, progress }: { job: TrainingJob; progress: TrainingProgress | null }) {
+function TrainingCourseCard({ job, progress, passed, certificate }: { job: TrainingJob; progress: TrainingProgress | null; passed: boolean; certificate: TrainingCertificate | null }) {
+  const status = courseLearningStatus(job, progress, passed);
   return (
     <Link
       href={`/training/${job.id}`}
@@ -104,6 +109,7 @@ function TrainingCourseCard({ job, progress }: { job: TrainingJob; progress: Tra
       {job.description && <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-600">{job.description}</p>}
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <StatusPill status={job.status} />
+        {job.mandatory && <span className="inline-flex rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">必修</span>}
         <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600">
           <FileAudio size={13} />
           {job.audio_paths.filter(Boolean).length} 页语音
@@ -115,14 +121,22 @@ function TrainingCourseCard({ job, progress }: { job: TrainingJob; progress: Tra
           </span>
         )}
         <span className={`inline-flex rounded-full px-2.5 py-1 text-xs ${
-          progress?.progress_percent === 100 ? "bg-emerald-50 text-emerald-700" : "bg-cyan/10 text-brand"
+          status === "completed" ? "bg-emerald-50 text-emerald-700" : status === "awaiting_exam" ? "bg-amber-50 text-amber-700" : "bg-cyan/10 text-brand"
         }`}>
-          {progress?.progress_percent ?? 0}% 完成
+          {status === "completed" ? "已完成" : status === "awaiting_exam" ? "学习完成，待考试" : `${progress?.progress_percent ?? 0}% 学习`}
         </span>
+        {certificate && <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs text-emerald-700">已获证书</span>}
       </div>
       <p className="mt-4 text-xs leading-5 text-slate-500">
-        {job.script_json.length} 页讲稿 · {new Date(job.created_at).toLocaleString("zh-CN")}
+        {job.due_at ? <span className={`inline-flex items-center gap-1 ${progress?.progress_percent !== 100 && new Date(job.due_at).getTime() < Date.now() ? "font-medium text-red-600" : ""}`}><CalendarClock size={13} />{progress?.progress_percent !== 100 && new Date(job.due_at).getTime() < Date.now() ? "已逾期 · " : "截止 "}{new Date(job.due_at).toLocaleDateString("zh-CN")}</span> : `${job.script_json.length} 页讲稿 · ${new Date(job.created_at).toLocaleString("zh-CN")}`}
       </p>
     </Link>
   );
+}
+
+function courseLearningStatus(job: TrainingJob, progress: TrainingProgress | null, passed: boolean) {
+  if (!progress) return "not_started";
+  if (progress.progress_percent < 100) return "learning";
+  if (job.quiz_enabled && !passed) return "awaiting_exam";
+  return "completed";
 }

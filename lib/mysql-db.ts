@@ -42,6 +42,9 @@ import type {
   TrainingAuditEvent,
   TrainingProgress,
   TrainingQuizAttempt,
+  TrainingQuizQuestion,
+  TrainingExamSession,
+  TrainingCertificate,
   TrainingVideoJob,
   UserProfile,
   WorkflowReadinessStats
@@ -513,6 +516,13 @@ function trainingFromRow(row: Row): TrainingJob {
     instructor: row.instructor ?? "",
     cover_url: row.cover_url ?? null,
     visible_departments: parseJson<string[]>(row.visible_departments, []),
+    mandatory: Boolean(row.mandatory),
+    due_at: row.due_at ? toIsoString(row.due_at) : null,
+    quiz_enabled: row.quiz_enabled === undefined ? false : Boolean(row.quiz_enabled),
+    quiz_pass_score: Number(row.quiz_pass_score ?? 80),
+    quiz_max_attempts: Number(row.quiz_max_attempts ?? 3),
+    quiz_time_limit_minutes: Number(row.quiz_time_limit_minutes ?? 30),
+    certificate_enabled: row.certificate_enabled === undefined ? true : Boolean(row.certificate_enabled),
     ppt_file_name: row.ppt_file_name,
     ppt_storage_path: row.ppt_storage_path,
     script_json: parseJson<TrainingJob["script_json"]>(row.script_json, []),
@@ -549,9 +559,62 @@ function trainingQuizAttemptFromRow(row: Row): TrainingQuizAttempt {
     id: row.id,
     training_job_id: row.training_job_id,
     user_id: row.user_id,
-    answers: parseJson<Record<string, string>>(row.answers, {}),
+    session_id: row.session_id ?? null,
+    answers: parseJson<Record<string, string | string[]>>(row.answers, {}),
+    result_detail: parseJson<TrainingQuizAttempt["result_detail"]>(row.result_detail, []),
     score: Number(row.score ?? 0),
     passed: Boolean(row.passed),
+    attempt_number: Number(row.attempt_number ?? 1),
+    duration_seconds: Number(row.duration_seconds ?? 0),
+    started_at: toIsoString(row.started_at ?? row.created_at),
+    submitted_at: toIsoString(row.submitted_at ?? row.created_at),
+    created_at: toIsoString(row.created_at)
+  };
+}
+
+function trainingQuizQuestionFromRow(row: Row): TrainingQuizQuestion {
+  return {
+    id: row.id,
+    training_job_id: row.training_job_id,
+    type: row.type,
+    prompt: row.prompt,
+    options: parseJson<string[]>(row.options, []),
+    correct_answers: parseJson<string[]>(row.correct_answers, []),
+    explanation: row.explanation ?? "",
+    score_weight: Number(row.score_weight ?? 1),
+    order_index: Number(row.order_index ?? 0),
+    status: row.status ?? "draft",
+    created_by: row.created_by ?? null,
+    created_at: toIsoString(row.created_at),
+    updated_at: toIsoString(row.updated_at ?? row.created_at)
+  };
+}
+
+function trainingExamSessionFromRow(row: Row): TrainingExamSession {
+  return {
+    id: row.id,
+    training_job_id: row.training_job_id,
+    user_id: row.user_id,
+    question_snapshot: parseJson<TrainingQuizQuestion[]>(row.question_snapshot, []),
+    status: row.status,
+    started_at: toIsoString(row.started_at),
+    expires_at: toIsoString(row.expires_at),
+    submitted_at: row.submitted_at ? toIsoString(row.submitted_at) : null,
+    created_at: toIsoString(row.created_at)
+  };
+}
+
+function trainingCertificateFromRow(row: Row): TrainingCertificate {
+  return {
+    id: row.id,
+    certificate_no: row.certificate_no,
+    training_job_id: row.training_job_id,
+    user_id: row.user_id,
+    quiz_attempt_id: row.quiz_attempt_id,
+    issued_at: toIsoString(row.issued_at),
+    revoked_at: row.revoked_at ? toIsoString(row.revoked_at) : null,
+    revoked_by: row.revoked_by ?? null,
+    revoke_reason: row.revoke_reason ?? null,
     created_at: toIsoString(row.created_at)
   };
 }
@@ -2468,8 +2531,8 @@ export async function createTrainingJob(input: Omit<TrainingJob, "id" | "created
   };
   await mysqlExecute(
     `insert into training_jobs
-      (id, title, description, instructor, cover_url, visible_departments, ppt_file_name, ppt_storage_path, script_json, audio_paths, status, publish_status, published_by, published_at, created_by, created_at)
-      values (:id, :title, :description, :instructor, :cover_url, :visible_departments, :ppt_file_name, :ppt_storage_path, :script_json, :audio_paths, :status, :publish_status, :published_by, :published_at, :created_by, :created_at)`,
+      (id, title, description, instructor, cover_url, visible_departments, mandatory, due_at, quiz_enabled, quiz_pass_score, quiz_max_attempts, quiz_time_limit_minutes, certificate_enabled, ppt_file_name, ppt_storage_path, script_json, audio_paths, status, publish_status, published_by, published_at, created_by, created_at)
+      values (:id, :title, :description, :instructor, :cover_url, :visible_departments, :mandatory, :due_at, :quiz_enabled, :quiz_pass_score, :quiz_max_attempts, :quiz_time_limit_minutes, :certificate_enabled, :ppt_file_name, :ppt_storage_path, :script_json, :audio_paths, :status, :publish_status, :published_by, :published_at, :created_by, :created_at)`,
     {
       ...record,
       script_json: JSON.stringify(record.script_json),
@@ -2482,7 +2545,7 @@ export async function createTrainingJob(input: Omit<TrainingJob, "id" | "created
 
 export async function updateTrainingJob(
   id: string,
-  input: Partial<Pick<TrainingJob, "script_json" | "audio_paths" | "status" | "title" | "description" | "instructor" | "cover_url" | "visible_departments" | "publish_status" | "published_by" | "published_at">>
+  input: Partial<Pick<TrainingJob, "script_json" | "audio_paths" | "status" | "title" | "description" | "instructor" | "cover_url" | "visible_departments" | "mandatory" | "due_at" | "quiz_enabled" | "quiz_pass_score" | "quiz_max_attempts" | "quiz_time_limit_minutes" | "certificate_enabled" | "publish_status" | "published_by" | "published_at">>
 ) {
   const existing = await getTrainingJob(id);
   if (!existing) {
@@ -2496,6 +2559,13 @@ export async function updateTrainingJob(
       instructor = :instructor,
       cover_url = :cover_url,
       visible_departments = :visible_departments,
+      mandatory = :mandatory,
+      due_at = :due_at,
+      quiz_enabled = :quiz_enabled,
+      quiz_pass_score = :quiz_pass_score,
+      quiz_max_attempts = :quiz_max_attempts,
+      quiz_time_limit_minutes = :quiz_time_limit_minutes,
+      certificate_enabled = :certificate_enabled,
       script_json = :script_json,
       audio_paths = :audio_paths,
       status = :status,
@@ -2510,6 +2580,13 @@ export async function updateTrainingJob(
       instructor: next.instructor,
       cover_url: next.cover_url,
       visible_departments: JSON.stringify(next.visible_departments),
+      mandatory: next.mandatory,
+      due_at: next.due_at,
+      quiz_enabled: next.quiz_enabled,
+      quiz_pass_score: next.quiz_pass_score,
+      quiz_max_attempts: next.quiz_max_attempts,
+      quiz_time_limit_minutes: next.quiz_time_limit_minutes,
+      certificate_enabled: next.certificate_enabled,
       script_json: JSON.stringify(next.script_json),
       audio_paths: JSON.stringify(next.audio_paths),
       status: next.status,
@@ -2530,6 +2607,9 @@ export async function deleteTrainingJob(id: string, options: { skipExistingCheck
   }
 
   await Promise.all([
+    mysqlExecute("delete from training_certificates where training_job_id = :id", { id }),
+    mysqlExecute("delete from training_exam_sessions where training_job_id = :id", { id }),
+    mysqlExecute("delete from training_quiz_questions where training_job_id = :id", { id }),
     mysqlExecute("delete from training_quiz_attempts where training_job_id = :id", { id }),
     mysqlExecute("delete from training_progress where training_job_id = :id", { id }),
     mysqlExecute("delete from training_video_jobs where training_job_id = :id", { id })
@@ -2795,14 +2875,100 @@ export async function createTrainingQuizAttempt(input: Omit<TrainingQuizAttempt,
   };
   await mysqlExecute(
     `insert into training_quiz_attempts
-      (id, training_job_id, user_id, answers, score, passed, created_at)
-      values (:id, :training_job_id, :user_id, :answers, :score, :passed, :created_at)`,
+      (id, training_job_id, user_id, session_id, answers, result_detail, score, passed, attempt_number, duration_seconds, started_at, submitted_at, created_at)
+      values (:id, :training_job_id, :user_id, :session_id, :answers, :result_detail, :score, :passed, :attempt_number, :duration_seconds, :started_at, :submitted_at, :created_at)`,
     {
       ...record,
-      answers: JSON.stringify(record.answers)
+      answers: JSON.stringify(record.answers),
+      result_detail: JSON.stringify(record.result_detail)
     }
   );
   return record;
+}
+
+export async function listTrainingQuizQuestions(trainingJobId: string, includeDraft = false) {
+  const rows = await mysqlQuery<Row[]>(
+    `select * from training_quiz_questions where training_job_id = :trainingJobId ${includeDraft ? "" : "and status = 'published'"} order by order_index, created_at`,
+    { trainingJobId }
+  );
+  return rows.map(trainingQuizQuestionFromRow);
+}
+
+export async function replaceTrainingQuizQuestions(
+  trainingJobId: string,
+  questions: Array<Omit<TrainingQuizQuestion, "id" | "training_job_id" | "created_at" | "updated_at">>
+) {
+  await mysqlExecute("delete from training_quiz_questions where training_job_id = :trainingJobId", { trainingJobId });
+  const created: TrainingQuizQuestion[] = [];
+  for (const question of questions) {
+    const now = new Date().toISOString();
+    const record: TrainingQuizQuestion = { id: createId("training-question"), training_job_id: trainingJobId, created_at: now, updated_at: now, ...question };
+    await mysqlExecute(
+      `insert into training_quiz_questions
+        (id, training_job_id, type, prompt, options, correct_answers, explanation, score_weight, order_index, status, created_by, created_at, updated_at)
+        values (:id, :training_job_id, :type, :prompt, :options, :correct_answers, :explanation, :score_weight, :order_index, :status, :created_by, :created_at, :updated_at)`,
+      { ...record, options: JSON.stringify(record.options), correct_answers: JSON.stringify(record.correct_answers) }
+    );
+    created.push(record);
+  }
+  return created;
+}
+
+export async function getActiveTrainingExamSession(trainingJobId: string, userId: string) {
+  const rows = await mysqlQuery<Row[]>(
+    "select * from training_exam_sessions where training_job_id = :trainingJobId and user_id = :userId and status = 'in_progress' order by created_at desc limit 1",
+    { trainingJobId, userId }
+  );
+  return rows[0] ? trainingExamSessionFromRow(rows[0]) : null;
+}
+
+export async function createTrainingExamSession(input: Omit<TrainingExamSession, "id" | "created_at">) {
+  const record: TrainingExamSession = { id: createId("training-exam"), created_at: new Date().toISOString(), ...input };
+  await mysqlExecute(
+    `insert into training_exam_sessions
+      (id, training_job_id, user_id, question_snapshot, status, started_at, expires_at, submitted_at, created_at)
+      values (:id, :training_job_id, :user_id, :question_snapshot, :status, :started_at, :expires_at, :submitted_at, :created_at)`,
+    { ...record, question_snapshot: JSON.stringify(record.question_snapshot) }
+  );
+  return record;
+}
+
+export async function updateTrainingExamSession(id: string, input: Pick<TrainingExamSession, "status" | "submitted_at">) {
+  await mysqlExecute("update training_exam_sessions set status = :status, submitted_at = :submitted_at where id = :id", { id, ...input });
+  const rows = await mysqlQuery<Row[]>("select * from training_exam_sessions where id = :id limit 1", { id });
+  if (!rows[0]) throw new Error("考试会话不存在");
+  return trainingExamSessionFromRow(rows[0]);
+}
+
+export async function getTrainingCertificate(trainingJobId: string, userId: string) {
+  const rows = await mysqlQuery<Row[]>("select * from training_certificates where training_job_id = :trainingJobId and user_id = :userId limit 1", { trainingJobId, userId });
+  return rows[0] ? trainingCertificateFromRow(rows[0]) : null;
+}
+
+export async function listTrainingCertificates(trainingJobId?: string) {
+  const rows = trainingJobId
+    ? await mysqlQuery<Row[]>("select * from training_certificates where training_job_id = :trainingJobId order by issued_at desc", { trainingJobId })
+    : await mysqlQuery<Row[]>("select * from training_certificates order by issued_at desc");
+  return rows.map(trainingCertificateFromRow);
+}
+
+export async function createTrainingCertificate(input: Omit<TrainingCertificate, "id" | "created_at">) {
+  const record: TrainingCertificate = { id: createId("training-certificate"), created_at: new Date().toISOString(), ...input };
+  await mysqlExecute(
+    `insert into training_certificates
+      (id, certificate_no, training_job_id, user_id, quiz_attempt_id, issued_at, revoked_at, revoked_by, revoke_reason, created_at)
+      values (:id, :certificate_no, :training_job_id, :user_id, :quiz_attempt_id, :issued_at, :revoked_at, :revoked_by, :revoke_reason, :created_at)
+      on duplicate key update quiz_attempt_id = values(quiz_attempt_id)`,
+    record
+  );
+  return (await getTrainingCertificate(input.training_job_id, input.user_id)) ?? record;
+}
+
+export async function revokeTrainingCertificate(id: string, revokedBy: string, reason: string) {
+  await mysqlExecute("update training_certificates set revoked_at = :revokedAt, revoked_by = :revokedBy, revoke_reason = :reason where id = :id", { id, revokedAt: new Date().toISOString(), revokedBy, reason });
+  const rows = await mysqlQuery<Row[]>("select * from training_certificates where id = :id limit 1", { id });
+  if (!rows[0]) throw new Error("培训证书不存在");
+  return trainingCertificateFromRow(rows[0]);
 }
 
 export async function listQaTestMetrics() {

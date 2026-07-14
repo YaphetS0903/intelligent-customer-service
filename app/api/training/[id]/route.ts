@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { createTrainingAuditEvent, deleteTrainingJob, getCurrentUser, getTrainingJob, listTrainingVideoJobs, requireAdmin, updateTrainingJob } from "@/lib/db";
+import { createTrainingAuditEvent, deleteTrainingJob, getCurrentUser, getTrainingJob, listTrainingQuizQuestions, listTrainingVideoJobs, requireAdmin, updateTrainingJob } from "@/lib/db";
 import { cleanupTrainingJobFiles } from "@/lib/training-file-cleanup";
 import { canAccessTrainingJob, validateTrainingPublish } from "@/lib/training-access";
+import { notifyTrainingPublished } from "@/lib/training-notifications";
 
 function normalizeAction(value: unknown) {
   if (value === "publish" || value === "unpublish" || value === "archive") {
@@ -73,6 +74,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (action === "publish") {
       const validationError = validateTrainingPublish(trainingJob);
       if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
+      if (trainingJob.quiz_enabled && (await listTrainingQuizQuestions(id)).length === 0) {
+        return NextResponse.json({ error: "课程已启用考试，请先发布正式考试题；不需要考试时可在考试设置中关闭。" }, { status: 400 });
+      }
     }
 
     const next = action === "publish"
@@ -94,6 +98,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       detail: action === "publish" ? "发布课程" : "下架课程",
       metadata: {}
     });
+
+    if (action === "publish") {
+      await notifyTrainingPublished(updated).catch((error) => console.warn("[training:publish-notification]", error));
+    }
 
     return NextResponse.json({ trainingJob: updated });
   } catch (error) {

@@ -4,14 +4,16 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Archive, CheckCircle2, CircleAlert, Clock, Download, Eye, EyeOff, FileAudio, Film, Loader2, Play, Save, Trash2, Trophy, Upload, UserCheck, UserX, Video } from "lucide-react";
 import { StatusPill } from "@/components/status-pill";
+import { TrainingQuizAdmin } from "@/components/training-quiz-admin";
 import { ActionConfirmDialog, ErrorRetry, PanelSkeleton, useToast, type ActionConfirmRequest } from "@/components/ui-feedback";
-import type { TrainingAuditEvent, TrainingJob, TrainingProgress, TrainingQuizAttempt, TrainingVideoJob, UserProfile } from "@/lib/types";
+import type { TrainingAuditEvent, TrainingCertificate, TrainingJob, TrainingProgress, TrainingQuizAttempt, TrainingVideoJob, UserProfile } from "@/lib/types";
 
 type LearnerReportRow = {
   user: UserProfile;
   progress: TrainingProgress | null;
   latestAttempt: TrainingQuizAttempt | null;
-  status: "not_started" | "learning" | "completed";
+  certificate: TrainingCertificate | null;
+  status: "not_started" | "learning" | "awaiting_exam" | "completed";
 };
 
 type TrainingConfirmDialogState = ActionConfirmRequest & {
@@ -24,6 +26,7 @@ export function TrainingAdmin() {
   const [progress, setProgress] = useState<TrainingProgress[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [quizAttempts, setQuizAttempts] = useState<TrainingQuizAttempt[]>([]);
+  const [certificates, setCertificates] = useState<TrainingCertificate[]>([]);
   const [auditEvents, setAuditEvents] = useState<TrainingAuditEvent[]>([]);
   const [selectedJobId, setSelectedJobId] = useState("");
   const [title, setTitle] = useState("");
@@ -85,6 +88,7 @@ export function TrainingAdmin() {
     setProgress(data.trainingProgress ?? []);
     setUsers(data.users ?? []);
     setQuizAttempts(data.quizAttempts ?? []);
+    setCertificates(data.certificates ?? []);
     setAuditEvents(data.auditEvents ?? []);
     setLoadError(null);
     setSelectedJobId((current) =>
@@ -133,8 +137,8 @@ export function TrainingAdmin() {
     [jobs, selectedJobId]
   );
   const learnerRows = useMemo(
-    () => selectedJob ? buildLearnerRows(selectedJob, visibleLearners(selectedJob, activeLearners), progress, quizAttempts) : [],
-    [activeLearners, progress, quizAttempts, selectedJob]
+    () => selectedJob ? buildLearnerRows(selectedJob, visibleLearners(selectedJob, activeLearners), progress, quizAttempts, certificates) : [],
+    [activeLearners, certificates, progress, quizAttempts, selectedJob]
   );
   const stats = useMemo(() => {
     return jobs.reduce(
@@ -276,11 +280,12 @@ export function TrainingAdmin() {
     if (!selectedJob) return;
     const rows = learnerRows.filter((row) => !departmentFilter || row.user.department === departmentFilter);
     const csv = [
-      ["课程", "员工", "邮箱", "部门", "岗位", "状态", "进度", "学习时长(秒)", "最后学习时间", "完课时间"],
+      ["课程", "员工", "邮箱", "部门", "岗位", "状态", "进度", "学习时长(秒)", "最后学习时间", "完课时间", "考试成绩", "考试结果", "证书编号"],
       ...rows.map((row) => [
         selectedJob.title, row.user.name, row.user.email, row.user.department, row.user.position,
         learnerStatusLabel(row.status), row.progress?.progress_percent ?? 0,
-        row.progress?.total_learning_seconds ?? 0, row.progress?.last_active_at ?? "", row.progress?.completed_at ?? ""
+        row.progress?.total_learning_seconds ?? 0, row.progress?.last_active_at ?? "", row.progress?.completed_at ?? "",
+        row.latestAttempt?.score ?? "", row.latestAttempt ? (row.latestAttempt.passed ? "通过" : "未通过") : "", row.certificate?.certificate_no ?? ""
       ])
     ].map((row) => row.map(csvCell).join(",")).join("\n");
     const url = URL.createObjectURL(new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }));
@@ -289,6 +294,20 @@ export function TrainingAdmin() {
     anchor.download = `${selectedJob.title}-学习记录.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
+  }
+
+  async function revokeCertificate(certificate: TrainingCertificate) {
+    const confirmed = await requestTrainingConfirm({ title: "作废培训证书？", description: `证书 ${certificate.certificate_no} 作废后，员工将无法继续下载。`, confirmLabel: "确认作废", tone: "danger" });
+    if (!confirmed) return;
+    try {
+      const response = await fetch(`/api/admin/training-certificates/${certificate.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: "管理员在培训后台作废" }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "作废证书失败");
+      setCertificates((current) => current.map((item) => item.id === certificate.id ? data.certificate : item));
+      pushToast({ tone: "success", title: "培训证书已作废" });
+    } catch (error) {
+      showError(error, "作废证书失败");
+    }
   }
 
   async function generateTrainingAudio(jobId: string) {
@@ -642,6 +661,8 @@ export function TrainingAdmin() {
             </section>
           )}
 
+          {selectedJob && <TrainingQuizAdmin job={selectedJob} onUpdated={loadJobs} />}
+
           <TrainingLearnerReport
             jobs={jobs}
             selectedJob={selectedJob}
@@ -658,6 +679,7 @@ export function TrainingAdmin() {
             learnerSearch={learnerSearch}
             onLearnerSearchChange={setLearnerSearch}
             onExport={exportLearningReport}
+            onRevokeCertificate={revokeCertificate}
           />
 
           {selectedJob && (
@@ -715,7 +737,7 @@ export function TrainingAdmin() {
                         <p>{countSlideImages(job)} 页课件画面</p>
                         <p>{job.audio_paths.filter(Boolean).length} 页已缓存语音</p>
                         <TrainingAudioStatus job={job} audioJob={latestAudioJob} />
-                        <p>{courseCompletionRate(job, progress, activeLearners)}% 完课率</p>
+                        <p>{courseCompletionRate(job, progress, quizAttempts, activeLearners)}% 完课率</p>
                       </td>
                       <td className="px-4 py-3 text-xs leading-5 text-slate-500">
                         <SlideVideoStatus videoJob={latestSlideVideo} />
@@ -777,7 +799,7 @@ export function TrainingAdmin() {
                   </div>
                   <div className="rounded-lg border border-line bg-slate-50 px-3 py-2">
                     <p className="text-slate-500">完课率</p>
-                    <p className="mt-1 font-semibold text-ink">{courseCompletionRate(job, progress, activeLearners)}%</p>
+                    <p className="mt-1 font-semibold text-ink">{courseCompletionRate(job, progress, quizAttempts, activeLearners)}%</p>
                   </div>
                 </div>
                 <div className="mt-3 rounded-lg border border-line bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
@@ -862,6 +884,7 @@ function TrainingLearnerReport({
   learnerSearch,
   onLearnerSearchChange,
   onExport
+  ,onRevokeCertificate
 }: {
   jobs: TrainingJob[];
   selectedJob: TrainingJob | null;
@@ -874,6 +897,7 @@ function TrainingLearnerReport({
   learnerSearch: string;
   onLearnerSearchChange: (keyword: string) => void;
   onExport: () => void;
+  onRevokeCertificate: (certificate: TrainingCertificate) => void;
 }) {
   const started = rows.filter((row) => row.progress).length;
   const completed = rows.filter((row) => row.status === "completed").length;
@@ -969,6 +993,7 @@ function TrainingLearnerReport({
                 ) : (
                   <p className="mt-1">未提交</p>
                 )}
+                {row.certificate && <div className="mt-2"><p className={row.certificate.revoked_at ? "text-red-600" : "text-emerald-700"}>{row.certificate.revoked_at ? "证书已作废" : row.certificate.certificate_no}</p>{!row.certificate.revoked_at && <button type="button" onClick={() => onRevokeCertificate(row.certificate!)} className="mt-1 text-red-600 hover:underline">作废证书</button>}</div>}
               </div>
               <div className="rounded-lg border border-line px-3 py-2">
                 <p className="font-medium text-slate-600">最近更新</p>
@@ -1039,6 +1064,7 @@ function TrainingLearnerReport({
                   ) : (
                     "未提交"
                   )}
+                  {row.certificate && <div className="mt-1"><p className={row.certificate.revoked_at ? "text-red-600" : "text-emerald-700"}>{row.certificate.revoked_at ? "证书已作废" : row.certificate.certificate_no}</p>{!row.certificate.revoked_at && <button type="button" onClick={() => onRevokeCertificate(row.certificate!)} className="text-red-600 hover:underline">作废</button>}</div>}
                 </td>
                 <td className="px-4 py-3 text-xs text-slate-500">
                   {row.progress ? formatDateTime(row.progress.last_active_at ?? row.progress.updated_at) : "-"}
@@ -1157,7 +1183,7 @@ function TrainingReadiness({
           <Metric label="讲稿页" value={stats.pages} />
           <Metric label="课件页" value={stats.slideImages} />
           <Metric label="语音页" value={stats.audio} tone="warn" />
-          <Metric label="完课" value={stats.completedLearners} tone="good" />
+          <Metric label="学习完成" value={stats.completedLearners} tone="good" />
           <Metric label="视频" value={stats.videos} tone="good" />
         </div>
       </div>
@@ -1202,7 +1228,8 @@ function buildLearnerRows(
   job: TrainingJob,
   learners: UserProfile[],
   progress: TrainingProgress[],
-  quizAttempts: TrainingQuizAttempt[]
+  quizAttempts: TrainingQuizAttempt[],
+  certificates: TrainingCertificate[]
 ): LearnerReportRow[] {
   return learners.map((user) => {
     const progressRecord = progress.find((item) => item.training_job_id === job.id && item.user_id === user.id) ?? null;
@@ -1212,13 +1239,14 @@ function buildLearnerRows(
     const status = !progressRecord
       ? "not_started"
       : progressRecord.progress_percent >= 100
-        ? "completed"
+        ? job.quiz_enabled && !latestAttempt?.passed ? "awaiting_exam" : "completed"
         : "learning";
 
     return {
       user,
       progress: progressRecord,
       latestAttempt,
+      certificate: certificates.find((item) => item.training_job_id === job.id && item.user_id === user.id) ?? null,
       status
     };
   });
@@ -1228,7 +1256,7 @@ function isActiveEmployee(user: UserProfile) {
   return user.role === "employee" && user.status === "active";
 }
 
-function courseCompletionRate(job: TrainingJob, progress: TrainingProgress[], learners: UserProfile[]) {
+function courseCompletionRate(job: TrainingJob, progress: TrainingProgress[], quizAttempts: TrainingQuizAttempt[], learners: UserProfile[]) {
   const targetLearners = visibleLearners(job, learners);
   if (targetLearners.length === 0) {
     return 0;
@@ -1236,7 +1264,11 @@ function courseCompletionRate(job: TrainingJob, progress: TrainingProgress[], le
 
   const related = progress.filter((item) => item.training_job_id === job.id);
 
-  return Math.round((related.filter((item) => item.progress_percent >= 100 && targetLearners.some((user) => user.id === item.user_id)).length / targetLearners.length) * 100);
+  const completed = related.filter((item) => {
+    if (item.progress_percent < 100 || !targetLearners.some((user) => user.id === item.user_id)) return false;
+    return !job.quiz_enabled || quizAttempts.some((attempt) => attempt.training_job_id === job.id && attempt.user_id === item.user_id && attempt.passed);
+  }).length;
+  return Math.round((completed / targetLearners.length) * 100);
 }
 
 function visibleLearners(job: TrainingJob, learners: UserProfile[]) {
@@ -1249,6 +1281,7 @@ function learnerStatusLabel(status: LearnerReportRow["status"]) {
   const labels: Record<LearnerReportRow["status"], string> = {
     not_started: "未开始",
     learning: "学习中",
+    awaiting_exam: "待考试",
     completed: "已完课"
   };
 
@@ -1259,6 +1292,7 @@ function learnerStatusClass(status: LearnerReportRow["status"]) {
   const classes: Record<LearnerReportRow["status"], string> = {
     not_started: "bg-slate-100 text-slate-600",
     learning: "bg-cyan/10 text-brand",
+    awaiting_exam: "bg-amber-50 text-amber-700",
     completed: "bg-emerald-50 text-emerald-700"
   };
 

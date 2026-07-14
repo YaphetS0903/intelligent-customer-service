@@ -508,6 +508,13 @@ export type TrainingJob = {
   instructor: string;
   cover_url: string | null;
   visible_departments: string[];
+  mandatory: boolean;
+  due_at: string | null;
+  quiz_enabled: boolean;
+  quiz_pass_score: number;
+  quiz_max_attempts: number;
+  quiz_time_limit_minutes: number;
+  certificate_enabled: boolean;
   ppt_file_name: string;
   ppt_storage_path: string | null;
   script_json: Array<{
@@ -565,7 +572,7 @@ export type TrainingAuditEvent = {
   id: string;
   training_job_id: string;
   actor_id: string;
-  action: "created" | "updated" | "published" | "unpublished" | "archived" | "audio_regenerated";
+  action: "created" | "updated" | "published" | "unpublished" | "archived" | "audio_regenerated" | "quiz_updated" | "reminders_sent" | "certificate_revoked";
   detail: string;
   metadata: Record<string, unknown>;
   created_at: string;
@@ -575,9 +582,64 @@ export type TrainingQuizAttempt = {
   id: string;
   training_job_id: string;
   user_id: string;
-  answers: Record<string, string>;
+  session_id: string | null;
+  answers: Record<string, string | string[]>;
+  result_detail: Array<{
+    question_id: string;
+    correct: boolean;
+    selected_answers: string[];
+    correct_answers: string[];
+    explanation: string;
+  }>;
   score: number;
   passed: boolean;
+  attempt_number: number;
+  duration_seconds: number;
+  started_at: string;
+  submitted_at: string;
+  created_at: string;
+};
+
+export type TrainingQuestionType = "single" | "multiple" | "true_false";
+
+export type TrainingQuizQuestion = {
+  id: string;
+  training_job_id: string;
+  type: TrainingQuestionType;
+  prompt: string;
+  options: string[];
+  correct_answers: string[];
+  explanation: string;
+  score_weight: number;
+  order_index: number;
+  status: "draft" | "published";
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TrainingExamSession = {
+  id: string;
+  training_job_id: string;
+  user_id: string;
+  question_snapshot: TrainingQuizQuestion[];
+  status: "in_progress" | "submitted" | "expired";
+  started_at: string;
+  expires_at: string;
+  submitted_at: string | null;
+  created_at: string;
+};
+
+export type TrainingCertificate = {
+  id: string;
+  certificate_no: string;
+  training_job_id: string;
+  user_id: string;
+  quiz_attempt_id: string;
+  issued_at: string;
+  revoked_at: string | null;
+  revoked_by: string | null;
+  revoke_reason: string | null;
   created_at: string;
 };
 

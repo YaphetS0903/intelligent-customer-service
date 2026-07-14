@@ -250,6 +250,13 @@ async function ensureDemoTrainingJob(createdBy: string) {
     instructor: "安全质量部",
     cover_url: null,
     visible_departments: [],
+    mandatory: true,
+    due_at: null,
+    quiz_enabled: false,
+    quiz_pass_score: 80,
+    quiz_max_attempts: 3,
+    quiz_time_limit_minutes: 30,
+    certificate_enabled: true,
     ppt_file_name: "车间安全与质量培训-演示.pptx",
     ppt_storage_path: null,
     script_json: [

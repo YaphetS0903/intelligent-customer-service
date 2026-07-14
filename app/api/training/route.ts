@@ -7,6 +7,8 @@ import {
   listTrainingJobs,
   listTrainingProgress,
   listTrainingVideoJobs,
+  listAllTrainingQuizAttempts,
+  listTrainingCertificates,
   requireAdmin
 } from "@/lib/db";
 import { startTrainingCourseBuildJob, storeTrainingSource } from "@/lib/training-course-job";
@@ -23,10 +25,12 @@ export async function GET() {
   try {
     const user = await getCurrentUser();
     const cached = await loadTrainingListSnapshot();
-    const [trainingJobs, allProgress, rawVideoJobs] = await Promise.all([
+    const [trainingJobs, allProgress, rawVideoJobs, allQuizAttempts, allCertificates] = await Promise.all([
       withFallback(listTrainingJobs(), cached?.trainingJobs ?? [], 8000, "list training jobs"),
       withFallback(listTrainingProgress(), cached?.trainingProgress ?? [], 2500, "list training progress"),
-      withFallback(listTrainingVideoJobs(), cached?.videoJobs ?? [], 2500, "list training video jobs")
+      withFallback(listTrainingVideoJobs(), cached?.videoJobs ?? [], 2500, "list training video jobs"),
+      withFallback(listAllTrainingQuizAttempts(), [], 2500, "list training quiz attempts"),
+      withFallback(listTrainingCertificates(), [], 2500, "list training certificates")
     ]);
     const videoJobs = await withFallback(
       reconcileStaleTrainingAudioJobs(await reconcileStaleSlideVideoJobs(rawVideoJobs)),
@@ -47,7 +51,9 @@ export async function GET() {
       setTrainingListSnapshot({ trainingJobs, trainingProgress: allProgress, videoJobs });
     }
 
-    return NextResponse.json({ trainingJobs: visibleTrainingJobs, trainingProgress, videoJobs });
+    const quizAttempts = user.role === "admin" ? allQuizAttempts : allQuizAttempts.filter((item) => item.user_id === user.id);
+    const certificates = user.role === "admin" ? allCertificates : allCertificates.filter((item) => item.user_id === user.id);
+    return NextResponse.json({ trainingJobs: visibleTrainingJobs, trainingProgress, videoJobs, quizAttempts, certificates });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "无权访问" },
@@ -115,6 +121,13 @@ export async function POST(request: Request) {
       instructor,
       cover_url: coverUrl || null,
       visible_departments: visibleDepartments,
+      mandatory: false,
+      due_at: null,
+      quiz_enabled: true,
+      quiz_pass_score: 80,
+      quiz_max_attempts: 3,
+      quiz_time_limit_minutes: 30,
+      certificate_enabled: true,
       ppt_file_name: file.name,
       ppt_storage_path: storagePath,
       script_json: [],

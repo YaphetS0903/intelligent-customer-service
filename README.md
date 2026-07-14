@@ -42,7 +42,7 @@ PPT 上传 -> 讲稿生成 -> TTS/数字人 -> 课程发布 -> 学习与测验
 - 员工端聊天支持流式输出，回答完成后保存消息和引用来源。
 - PPTX 自动解析、逐页讲稿生成和 TTS 语音播放。
 - PPT 语音讲解提供生成流程、课程发布/下架、课程统计、讲稿页数、语音缓存状态和播放页错误提示。
-- 培训课程支持学习进度、完课率和考试测验；未发布或归档课程不会出现在员工端培训列表。
+- 培训课程支持可信学习进度、正式考试、完课证书、必修期限和学习提醒；未发布或归档课程不会出现在员工端培训列表。
 - GitHub Actions 自动执行 typecheck、build 和 Playwright 回归测试。
 - 提供 SSH 自动部署流水线、PM2 进程配置、服务器部署脚本和 MySQL 备份脚本。
 - 未配置第三方 API 时支持演示模式。
@@ -239,6 +239,7 @@ SUPABASE_ADMIN_EMAILS=admin@company.com,hr@company.com
 -- supabase/migrations/20260705_position_acl.sql
 -- supabase/migrations/20260705_training_publish_status.sql
 -- supabase/migrations/20260712_training_learning_loop.sql
+-- supabase/migrations/20260712_training_phase2_closeout.sql
 ```
 
 用于升级 `training_jobs` 表结构、语音缓存字段、旧课程的备注字段、课程发布状态、岗位权限、单文档 ACL，以及课程资料、部门可见范围、可信学习进度和培训审计字段。
@@ -258,6 +259,8 @@ MYSQL_PWD="$MYSQL_PASSWORD" mysql \
 ```text
 scripts/migrations/20260712_training_learning_loop.mysql.rollback.sql
 scripts/migrations/20260712_training_learning_loop.supabase.rollback.sql
+scripts/migrations/20260712_training_phase2_closeout.mysql.rollback.sql
+scripts/migrations/20260712_training_phase2_closeout.supabase.rollback.sql
 ```
 
 ## OpenAI 初始化
@@ -530,7 +533,17 @@ OCR_HEADERS={"X-Client":"tianrui","X-Request-Source":"training"}
 - 课程完课率以该课程实际可见员工为分母；部门受限课程不会把无权访问的员工计入应学人数。
 - 员工课程列表、详情、音频、课件图片、测验、视频状态、视频文件和学习进度接口统一检查课程可见范围，越权请求返回 `403`。
 
-如果已配置数字人 API，管理员仍可在课程列表中生成数字人视频，员工进入课程详情页后可直接播放。考试题库、证书、学习提醒和真正的数字人生成服务不属于当前培训闭环。
+### 正式考试、证书与提醒
+
+- 管理员可以为课程维护单选题、多选题和判断题，也可以根据讲稿生成题目初稿，审核答案与解析后发布正式考试。
+- 每门课程可配置合格分数、考试次数、考试时限、是否必修、完成期限和是否签发证书。启用考试但没有正式题目时，课程不能发布。
+- 员工完成全部课程学习后才能开考；考试会话、倒计时、次数限制、判分和正确答案全部由服务端控制，浏览器不会收到正确答案。
+- 正式完课要求“学习进度 100% 且考试通过”；未启用考试的课程仍以学习进度 100% 为完课条件。
+- 考试通过后自动签发唯一编号的中文 PDF 证书。管理员可在学习跟踪中查看和作废证书，作废后下载接口立即拒绝访问。
+- 课程发布时向授权员工发送站内通知；管理员可提醒未完课员工，逾期提醒显示更高告警级别，并按课程、员工和日期去重。
+- 证书 PDF 默认查找 Linux Noto CJK、文泉驿或 macOS 中文字体，也可以通过 `CERTIFICATE_FONT_PATH` 和 `CERTIFICATE_FONT_FACE` 指定字体。
+
+如果已配置数字人 API，管理员仍可在课程列表中生成数字人视频，员工进入课程详情页后可直接播放。系统负责通用数字人 API、任务状态、失败重试和播放；真实视频生成质量与可用性取决于接入的第三方或自部署数字人服务。
 
 当前 PPT 能力聚焦文字型 PPT，并会尝试解析 `ppt/notesSlides` 中的演讲者备注。复杂图表、图片中的文字和动画暂不解析。后续可以继续接入 OCR 和页面截图增强视觉理解。
 

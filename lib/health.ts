@@ -132,6 +132,9 @@ const schemaTables = [
   "training_progress",
   "training_audit_events",
   "training_quiz_attempts",
+  "training_quiz_questions",
+  "training_exam_sessions",
+  "training_certificates",
   "qa_test_cases"
 ];
 

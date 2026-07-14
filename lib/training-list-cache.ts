@@ -117,7 +117,14 @@ function normalizeSnapshot(value: unknown): TrainingListSnapshot | null {
       description: job.description ?? "",
       instructor: job.instructor ?? "",
       cover_url: job.cover_url ?? null,
-      visible_departments: Array.isArray(job.visible_departments) ? job.visible_departments : []
+      visible_departments: Array.isArray(job.visible_departments) ? job.visible_departments : [],
+      mandatory: job.mandatory ?? false,
+      due_at: job.due_at ?? null,
+      quiz_enabled: job.quiz_enabled ?? false,
+      quiz_pass_score: job.quiz_pass_score ?? 80,
+      quiz_max_attempts: job.quiz_max_attempts ?? 3,
+      quiz_time_limit_minutes: job.quiz_time_limit_minutes ?? 30,
+      certificate_enabled: job.certificate_enabled ?? true
     })),
     trainingProgress: snapshot.trainingProgress.map((progress) => ({
       ...progress,

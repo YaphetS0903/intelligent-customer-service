@@ -1176,6 +1176,9 @@ test.describe("天瑞内饰智能客服回归", () => {
     await expect(page.getByPlaceholder("课程简介").last()).toBeVisible();
     await expect(page.getByRole("combobox", { name: "筛选部门" })).toBeVisible();
     await expect(page.getByRole("button", { name: "导出" })).toBeEnabled();
+    await expect(page.getByRole("heading", { name: "正式考试与完课证书" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "根据讲稿生成初稿" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "提醒未完课员工" })).toBeVisible();
   });
 
   test("员工培训播放器提供倍速、续播和可信完课提示", async ({ page }) => {
@@ -1198,5 +1201,14 @@ test.describe("天瑞内饰智能客服回归", () => {
     const saved = (await progress.json()).progress as { completed_pages: number[]; playback_position_seconds: number };
     expect(saved.completed_pages).not.toContain(0);
     expect(saved.playback_position_seconds).toBe(12);
+
+    const quiz = await page.request.get(`/api/training/${payload.trainingJobs[0].id}/quiz`, { failOnStatusCode: false });
+    expect(quiz.ok(), await quiz.text()).toBeTruthy();
+    const quizPayload = await quiz.json() as { settings: { pass_score: number; max_attempts: number; time_limit_minutes: number }; session: { question_snapshot: Array<Record<string, unknown>> } | null };
+    expect(quizPayload.settings).toEqual(expect.objectContaining({ pass_score: expect.any(Number), max_attempts: expect.any(Number), time_limit_minutes: expect.any(Number) }));
+    for (const question of quizPayload.session?.question_snapshot ?? []) {
+      expect(question).not.toHaveProperty("correct_answers");
+      expect(question).not.toHaveProperty("explanation");
+    }
   });
 });

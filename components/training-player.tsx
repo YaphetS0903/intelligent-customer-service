@@ -7,6 +7,7 @@ import {
   ChevronRight,
   CircleAlert,
   ClipboardCheck,
+  Download,
   FileText,
   ListChecks,
   Loader2,
@@ -18,13 +19,17 @@ import {
 } from "lucide-react";
 import { speakWithBrowserSpeech, stopBrowserSpeech } from "@/components/browser-speech";
 import { StatusPill } from "@/components/status-pill";
-import type { TrainingJob, TrainingProgress, TrainingQuizAttempt, TrainingVideoJob } from "@/lib/types";
+import type { TrainingCertificate, TrainingJob, TrainingProgress, TrainingQuestionType, TrainingQuizAttempt, TrainingVideoJob } from "@/lib/types";
 
 type QuizQuestion = {
   id: string;
-  question: string;
+  type: TrainingQuestionType;
+  prompt: string;
   options: string[];
 };
+
+type QuizSession = { id: string; question_snapshot: QuizQuestion[]; expires_at: string };
+type QuizSettings = { pass_score: number; max_attempts: number; time_limit_minutes: number; certificate_enabled: boolean };
 
 export function TrainingPlayer({ job }: { job: TrainingJob }) {
   const [pageIndex, setPageIndex] = useState(0);
@@ -32,8 +37,14 @@ export function TrainingPlayer({ job }: { job: TrainingJob }) {
   const [completedPages, setCompletedPages] = useState<number[]>([]);
   const [progressRecord, setProgressRecord] = useState<TrainingProgress | null>(null);
   const [quizQuestions, setQuizQuestions] = useState<QuizQuestion[]>([]);
-  const [quizAnswers, setQuizAnswers] = useState<Record<string, string>>({});
+  const [quizAnswers, setQuizAnswers] = useState<Record<string, string | string[]>>({});
   const [latestAttempt, setLatestAttempt] = useState<TrainingQuizAttempt | null>(null);
+  const [quizSession, setQuizSession] = useState<QuizSession | null>(null);
+  const [quizSettings, setQuizSettings] = useState<QuizSettings | null>(null);
+  const [quizEligible, setQuizEligible] = useState(false);
+  const [quizBlockedReason, setQuizBlockedReason] = useState<string | null>(null);
+  const [certificate, setCertificate] = useState<TrainingCertificate | null>(null);
+  const [quizClock, setQuizClock] = useState(Date.now());
   const [videoJobs, setVideoJobs] = useState<TrainingVideoJob[]>([]);
   const [submittingQuiz, setSubmittingQuiz] = useState(false);
   const [trainingNotice, setTrainingNotice] = useState<string | null>(null);
@@ -101,6 +112,12 @@ export function TrainingPlayer({ job }: { job: TrainingJob }) {
   }, [completedPages]);
 
   useEffect(() => {
+    if (!quizSession) return;
+    const timer = window.setInterval(() => setQuizClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [quizSession]);
+
+  useEffect(() => {
     if (!playing) return;
     const timer = window.setInterval(() => {
       void saveProgress(pageIndex, 5 * playbackRate, 5, audioRef.current?.currentTime ?? 0);
@@ -137,8 +154,13 @@ export function TrainingPlayer({ job }: { job: TrainingJob }) {
     }
 
     if (quizResponse.ok) {
-      setQuizQuestions(quizData.questions ?? []);
+      setQuizSession(quizData.session ?? null);
+      setQuizQuestions(quizData.session?.question_snapshot ?? []);
+      setQuizSettings(quizData.settings ?? null);
+      setQuizEligible(Boolean(quizData.eligible));
+      setQuizBlockedReason(quizData.blocked_reason ?? null);
       setLatestAttempt(quizData.latestAttempt ?? null);
+      setCertificate(quizData.certificate ?? null);
     }
 
     if (videoResponse.ok) {
@@ -312,6 +334,25 @@ export function TrainingPlayer({ job }: { job: TrainingJob }) {
     setFailedSlideImages((current) => current.includes(index) ? current : [...current, index]);
   }
 
+  async function startQuiz() {
+    setSubmittingQuiz(true);
+    setTrainingNotice(null);
+    try {
+      const response = await fetch(`/api/training/${job.id}/quiz`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "start" }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "开始考试失败");
+      setQuizSession(data.session);
+      setQuizQuestions(data.session.question_snapshot ?? []);
+      setQuizSettings(data.settings ?? quizSettings);
+      setQuizAnswers({});
+      setQuizClock(Date.now());
+    } catch (error) {
+      setTrainingNotice(error instanceof Error ? error.message : "开始考试失败");
+    } finally {
+      setSubmittingQuiz(false);
+    }
+  }
+
   async function submitQuiz() {
     setSubmittingQuiz(true);
     setTrainingNotice(null);
@@ -320,7 +361,7 @@ export function TrainingPlayer({ job }: { job: TrainingJob }) {
       const response = await fetch(`/api/training/${job.id}/quiz`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers: quizAnswers })
+        body: JSON.stringify({ action: "submit", session_id: quizSession?.id, answers: quizAnswers })
       });
       const data = await response.json();
 
@@ -329,7 +370,11 @@ export function TrainingPlayer({ job }: { job: TrainingJob }) {
       }
 
       setLatestAttempt(data.attempt);
-      setTrainingNotice(`测验完成：${data.attempt.score} 分，答对 ${data.correct}/${data.total} 题。`);
+      setCertificate(data.certificate ?? certificate);
+      setQuizSession(null);
+      setQuizQuestions([]);
+      setTrainingNotice(`考试完成：${data.attempt.score} 分，答对 ${data.correct}/${data.total} 题。`);
+      await loadTrainingState();
     } catch (error) {
       setTrainingNotice(error instanceof Error ? error.message : "提交测验失败");
     } finally {
@@ -489,12 +534,12 @@ export function TrainingPlayer({ job }: { job: TrainingJob }) {
           <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700">{slide.script}</p>
         </div>
 
-        {quizQuestions.length > 0 && (
+        {job.quiz_enabled && (
           <div className="mt-8 ui-card-muted p-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
                 <ClipboardCheck size={17} className="text-brand" />
-                <h2 className="text-sm font-semibold text-ink">课程测验</h2>
+                <h2 className="text-sm font-semibold text-ink">课程考试</h2>
               </div>
               {latestAttempt && (
                 <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${
@@ -504,19 +549,30 @@ export function TrainingPlayer({ job }: { job: TrainingJob }) {
                 </span>
               )}
             </div>
-            <div className="mt-4 space-y-4">
+            {quizSettings && <p className="mt-2 text-xs text-slate-500">合格 {quizSettings.pass_score} 分 · 最多 {quizSettings.max_attempts} 次 · 限时 {quizSettings.time_limit_minutes} 分钟</p>}
+            {certificate && !certificate.revoked_at && <a href={`/api/training/${job.id}/certificate`} className="ui-button-secondary mt-3 h-10"><Download size={16} />下载完课证书</a>}
+            {!quizSession && !certificate && (
+              <div className="mt-4 rounded-lg border border-line bg-white p-4">
+                <p className="text-sm text-slate-600">{quizBlockedReason ?? "课程已学完，可以开始正式考试。"}</p>
+                <button type="button" onClick={() => void startQuiz()} disabled={!quizEligible || submittingQuiz} className="ui-button-primary mt-3 h-10">
+                  {submittingQuiz ? <Loader2 className="animate-spin" size={16} /> : <ClipboardCheck size={16} />}开始考试
+                </button>
+              </div>
+            )}
+            {quizSession && <div className="mt-3 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"><span>考试进行中</span><strong>剩余 {formatCountdown(Math.max(0, new Date(quizSession.expires_at).getTime() - quizClock))}</strong></div>}
+            {quizSession && <div className="mt-4 space-y-4">
               {quizQuestions.map((question) => (
                 <div key={question.id} className="ui-card p-3">
-                  <p className="text-sm font-medium text-ink">{question.question}</p>
+                  <p className="text-sm font-medium text-ink">{question.prompt}</p>
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
                     {question.options.map((option) => (
                       <label key={option} className="flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm text-slate-700">
                         <input
-                          type="radio"
+                          type={question.type === "multiple" ? "checkbox" : "radio"}
                           name={question.id}
                           value={option}
-                          checked={quizAnswers[question.id] === option}
-                          onChange={(event) => setQuizAnswers((current) => ({ ...current, [question.id]: event.target.value }))}
+                          checked={answerIncludes(quizAnswers[question.id], option)}
+                          onChange={(event) => setQuizAnswers((current) => ({ ...current, [question.id]: updateAnswer(current[question.id], option, question.type === "multiple", event.target.checked) }))}
                         />
                         <span>{option}</span>
                       </label>
@@ -524,16 +580,17 @@ export function TrainingPlayer({ job }: { job: TrainingJob }) {
                   </div>
                 </div>
               ))}
-            </div>
-            <button
+            </div>}
+            {quizSession && <button
               type="button"
               onClick={() => void submitQuiz()}
-              disabled={submittingQuiz || Object.keys(quizAnswers).length < quizQuestions.length}
+              disabled={submittingQuiz || quizQuestions.some((question) => !quizAnswers[question.id] || answerValues(quizAnswers[question.id]).length === 0)}
               className="ui-button-success mt-4 h-10"
             >
               {submittingQuiz ? <Loader2 className="animate-spin" size={16} /> : <ClipboardCheck size={16} />}
-              提交测验
-            </button>
+              提交考试
+            </button>}
+            {(latestAttempt?.result_detail?.length ?? 0) > 0 && <div className="mt-4 space-y-2"><p className="text-sm font-semibold text-ink">最近考试解析</p>{latestAttempt!.result_detail.map((item, index) => <div key={item.question_id} className={`rounded-lg px-3 py-2 text-xs leading-5 ${item.correct ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}><strong>第 {index + 1} 题：{item.correct ? "正确" : "错误"}</strong>{item.explanation && <p>{item.explanation}</p>}</div>)}</div>}
             {trainingNotice && <p className="mt-3 text-sm text-slate-600">{trainingNotice}</p>}
           </div>
         )}
@@ -739,4 +796,25 @@ function formatLearningTime(seconds: number) {
   if (totalMinutes < 1) return `${Math.max(0, Math.round(seconds))} 秒`;
   if (totalMinutes < 60) return `${totalMinutes} 分钟`;
   return `${Math.floor(totalMinutes / 60)} 小时 ${totalMinutes % 60} 分`;
+}
+
+function answerValues(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value : value ? [value] : [];
+}
+
+function answerIncludes(value: string | string[] | undefined, option: string) {
+  return answerValues(value).includes(option);
+}
+
+function updateAnswer(current: string | string[] | undefined, option: string, multiple: boolean, checked: boolean): string | string[] {
+  if (!multiple) return option;
+  const values = answerValues(current);
+  return checked ? [...new Set([...values, option])] : values.filter((value) => value !== option);
+}
+
+function formatCountdown(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }

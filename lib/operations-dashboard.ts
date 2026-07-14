@@ -249,7 +249,13 @@ export function buildOperationsDashboardReport(data: DashboardData, filters: Ope
     eligibleIds.has(progress.user_id) && publishedTrainingIds.has(progress.training_job_id) && inRange(progress.updated_at)
   ));
   const participantIds = new Set(scopedProgress.map((progress) => progress.user_id));
-  const completedProgress = scopedProgress.filter((progress) => progress.progress_percent >= 100 || Boolean(progress.completed_at));
+  const trainingJobById = new Map(data.trainingJobs.map((job) => [job.id, job]));
+  const passedTrainingKeys = new Set(data.quizAttempts.filter((attempt) => attempt.passed).map((attempt) => `${attempt.user_id}:${attempt.training_job_id}`));
+  const completedProgress = scopedProgress.filter((progress) => {
+    if (progress.progress_percent < 100 && !progress.completed_at) return false;
+    const job = trainingJobById.get(progress.training_job_id);
+    return !job?.quiz_enabled || passedTrainingKeys.has(`${progress.user_id}:${progress.training_job_id}`);
+  });
   const completedParticipantIds = new Set(completedProgress.map((progress) => progress.user_id));
   const scopedQuizAttempts = data.quizAttempts.filter((attempt) => (
     eligibleIds.has(attempt.user_id) && publishedTrainingIds.has(attempt.training_job_id) && inRange(attempt.created_at)

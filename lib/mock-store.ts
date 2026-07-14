@@ -21,6 +21,9 @@ import type {
   TrainingAuditEvent,
   TrainingProgress,
   TrainingQuizAttempt,
+  TrainingQuizQuestion,
+  TrainingExamSession,
+  TrainingCertificate,
   TrainingVideoJob,
   UserProfile
 } from "@/lib/types";
@@ -62,6 +65,9 @@ type MemoryStore = {
   trainingVideoJobs: TrainingVideoJob[];
   trainingProgress: TrainingProgress[];
   trainingQuizAttempts: TrainingQuizAttempt[];
+  trainingQuizQuestions: TrainingQuizQuestion[];
+  trainingExamSessions: TrainingExamSession[];
+  trainingCertificates: TrainingCertificate[];
   trainingAuditEvents: TrainingAuditEvent[];
 };
 
@@ -126,6 +132,9 @@ export const memoryStore: MemoryStore = globalThis.__enterpriseAiSupportMemorySt
   trainingVideoJobs: [],
   trainingProgress: [],
   trainingQuizAttempts: [],
+  trainingQuizQuestions: [],
+  trainingExamSessions: [],
+  trainingCertificates: [],
   trainingAuditEvents: []
 };
 

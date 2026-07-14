@@ -39,6 +39,9 @@ import type {
   TrainingAuditEvent,
   TrainingProgress,
   TrainingQuizAttempt,
+  TrainingQuizQuestion,
+  TrainingExamSession,
+  TrainingCertificate,
   TrainingVideoJob,
   UserProfile,
   WorkflowReadinessStats
@@ -2953,7 +2956,7 @@ export async function listTrainingJobs(): Promise<TrainingJob[]> {
     throw new Error(error.message);
   }
 
-  return data ?? [];
+  return (data ?? []).map(normalizeTrainingJob);
 }
 
 export async function getTrainingJob(id: string): Promise<TrainingJob | null> {
@@ -2976,7 +2979,7 @@ export async function getTrainingJob(id: string): Promise<TrainingJob | null> {
     throw new Error(error.message);
   }
 
-  return data;
+  return data ? normalizeTrainingJob(data) : null;
 }
 
 export async function createTrainingJob(input: Omit<TrainingJob, "id" | "created_at">): Promise<TrainingJob> {
@@ -3001,12 +3004,12 @@ export async function createTrainingJob(input: Omit<TrainingJob, "id" | "created
     throw new Error(error.message);
   }
 
-  return data;
+  return normalizeTrainingJob(data);
 }
 
 export async function updateTrainingJob(
   id: string,
-  input: Partial<Pick<TrainingJob, "script_json" | "audio_paths" | "status" | "title" | "description" | "instructor" | "cover_url" | "visible_departments" | "publish_status" | "published_by" | "published_at">>
+  input: Partial<Pick<TrainingJob, "script_json" | "audio_paths" | "status" | "title" | "description" | "instructor" | "cover_url" | "visible_departments" | "mandatory" | "due_at" | "quiz_enabled" | "quiz_pass_score" | "quiz_max_attempts" | "quiz_time_limit_minutes" | "certificate_enabled" | "publish_status" | "published_by" | "published_at">>
 ): Promise<TrainingJob> {
   if (isMySqlDatabase()) {
     return mysqlDb.updateTrainingJob(id, input);
@@ -3038,7 +3041,23 @@ export async function updateTrainingJob(
     throw new Error(error.message);
   }
 
-  return data;
+  return normalizeTrainingJob(data);
+}
+
+function normalizeTrainingJob(data: Record<string, unknown>): TrainingJob {
+  return {
+    ...(data as unknown as TrainingJob),
+    description: String(data.description ?? ""),
+    instructor: String(data.instructor ?? ""),
+    visible_departments: Array.isArray(data.visible_departments) ? data.visible_departments.map(String) : [],
+    mandatory: Boolean(data.mandatory),
+    due_at: data.due_at ? String(data.due_at) : null,
+    quiz_enabled: data.quiz_enabled === undefined ? false : Boolean(data.quiz_enabled),
+    quiz_pass_score: Number(data.quiz_pass_score ?? 80),
+    quiz_max_attempts: Number(data.quiz_max_attempts ?? 3),
+    quiz_time_limit_minutes: Number(data.quiz_time_limit_minutes ?? 30),
+    certificate_enabled: data.certificate_enabled === undefined ? true : Boolean(data.certificate_enabled)
+  };
 }
 
 export async function deleteTrainingJob(id: string, options: { skipExistingCheck?: boolean } = {}): Promise<void> {
@@ -3057,11 +3076,14 @@ export async function deleteTrainingJob(id: string, options: { skipExistingCheck
     memoryStore.trainingVideoJobs = memoryStore.trainingVideoJobs.filter((item) => item.training_job_id !== id);
     memoryStore.trainingProgress = memoryStore.trainingProgress.filter((item) => item.training_job_id !== id);
     memoryStore.trainingQuizAttempts = memoryStore.trainingQuizAttempts.filter((item) => item.training_job_id !== id);
+    memoryStore.trainingQuizQuestions = memoryStore.trainingQuizQuestions.filter((item) => item.training_job_id !== id);
+    memoryStore.trainingExamSessions = memoryStore.trainingExamSessions.filter((item) => item.training_job_id !== id);
+    memoryStore.trainingCertificates = memoryStore.trainingCertificates.filter((item) => item.training_job_id !== id);
     memoryStore.trainingJobs.splice(jobIndex, 1);
     return;
   }
 
-  const cleanupTables = ["training_quiz_attempts", "training_progress", "training_video_jobs"];
+  const cleanupTables = ["training_certificates", "training_exam_sessions", "training_quiz_questions", "training_quiz_attempts", "training_progress", "training_video_jobs"];
   for (const table of cleanupTables) {
     const { error } = await supabase.from(table).delete().eq("training_job_id", id);
     if (error) {
@@ -3475,6 +3497,117 @@ export async function createTrainingQuizAttempt(input: Omit<TrainingQuizAttempt,
     throw new Error(error.message);
   }
 
+  return data;
+}
+
+export async function listTrainingQuizQuestions(trainingJobId: string, includeDraft = false): Promise<TrainingQuizQuestion[]> {
+  if (isMySqlDatabase()) return mysqlDb.listTrainingQuizQuestions(trainingJobId, includeDraft);
+  const supabase = createSupabaseAdminClient();
+  if (!supabase) return memoryStore.trainingQuizQuestions.filter((item) => item.training_job_id === trainingJobId && (includeDraft || item.status === "published")).sort((a, b) => a.order_index - b.order_index);
+  let query = supabase.from("training_quiz_questions").select("*").eq("training_job_id", trainingJobId).order("order_index");
+  if (!includeDraft) query = query.eq("status", "published");
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function replaceTrainingQuizQuestions(
+  trainingJobId: string,
+  questions: Array<Omit<TrainingQuizQuestion, "id" | "training_job_id" | "created_at" | "updated_at">>
+) {
+  if (isMySqlDatabase()) return mysqlDb.replaceTrainingQuizQuestions(trainingJobId, questions);
+  const records = questions.map((question) => { const now = new Date().toISOString(); return { id: createId("training-question"), training_job_id: trainingJobId, created_at: now, updated_at: now, ...question }; });
+  const supabase = createSupabaseAdminClient();
+  if (!supabase) {
+    memoryStore.trainingQuizQuestions = memoryStore.trainingQuizQuestions.filter((item) => item.training_job_id !== trainingJobId);
+    memoryStore.trainingQuizQuestions.push(...records);
+    return records;
+  }
+  const { error: deleteError } = await supabase.from("training_quiz_questions").delete().eq("training_job_id", trainingJobId);
+  if (deleteError) throw new Error(deleteError.message);
+  if (records.length === 0) return [];
+  const { data, error } = await supabase.from("training_quiz_questions").insert(records).select("*");
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function getActiveTrainingExamSession(trainingJobId: string, userId: string): Promise<TrainingExamSession | null> {
+  if (isMySqlDatabase()) return mysqlDb.getActiveTrainingExamSession(trainingJobId, userId);
+  const supabase = createSupabaseAdminClient();
+  if (!supabase) return memoryStore.trainingExamSessions.filter((item) => item.training_job_id === trainingJobId && item.user_id === userId && item.status === "in_progress").sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null;
+  const { data, error } = await supabase.from("training_exam_sessions").select("*").eq("training_job_id", trainingJobId).eq("user_id", userId).eq("status", "in_progress").order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function createTrainingExamSession(input: Omit<TrainingExamSession, "id" | "created_at">): Promise<TrainingExamSession> {
+  if (isMySqlDatabase()) return mysqlDb.createTrainingExamSession(input);
+  const record = { id: createId("training-exam"), created_at: new Date().toISOString(), ...input };
+  const supabase = createSupabaseAdminClient();
+  if (!supabase) { memoryStore.trainingExamSessions.unshift(record); return record; }
+  const { data, error } = await supabase.from("training_exam_sessions").insert(record).select("*").single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function updateTrainingExamSession(id: string, input: Pick<TrainingExamSession, "status" | "submitted_at">): Promise<TrainingExamSession> {
+  if (isMySqlDatabase()) return mysqlDb.updateTrainingExamSession(id, input);
+  const supabase = createSupabaseAdminClient();
+  if (!supabase) {
+    const index = memoryStore.trainingExamSessions.findIndex((item) => item.id === id);
+    if (index < 0) throw new Error("考试会话不存在");
+    memoryStore.trainingExamSessions[index] = { ...memoryStore.trainingExamSessions[index], ...input };
+    return memoryStore.trainingExamSessions[index];
+  }
+  const { data, error } = await supabase.from("training_exam_sessions").update(input).eq("id", id).select("*").single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function getTrainingCertificate(trainingJobId: string, userId: string): Promise<TrainingCertificate | null> {
+  if (isMySqlDatabase()) return mysqlDb.getTrainingCertificate(trainingJobId, userId);
+  const supabase = createSupabaseAdminClient();
+  if (!supabase) return memoryStore.trainingCertificates.find((item) => item.training_job_id === trainingJobId && item.user_id === userId) ?? null;
+  const { data, error } = await supabase.from("training_certificates").select("*").eq("training_job_id", trainingJobId).eq("user_id", userId).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function listTrainingCertificates(trainingJobId?: string): Promise<TrainingCertificate[]> {
+  if (isMySqlDatabase()) return mysqlDb.listTrainingCertificates(trainingJobId);
+  const supabase = createSupabaseAdminClient();
+  if (!supabase) return memoryStore.trainingCertificates.filter((item) => !trainingJobId || item.training_job_id === trainingJobId);
+  let query = supabase.from("training_certificates").select("*").order("issued_at", { ascending: false });
+  if (trainingJobId) query = query.eq("training_job_id", trainingJobId);
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function createTrainingCertificate(input: Omit<TrainingCertificate, "id" | "created_at">): Promise<TrainingCertificate> {
+  if (isMySqlDatabase()) return mysqlDb.createTrainingCertificate(input);
+  const existing = await getTrainingCertificate(input.training_job_id, input.user_id);
+  if (existing) return existing;
+  const record = { id: createId("training-certificate"), created_at: new Date().toISOString(), ...input };
+  const supabase = createSupabaseAdminClient();
+  if (!supabase) { memoryStore.trainingCertificates.unshift(record); return record; }
+  const { data, error } = await supabase.from("training_certificates").insert(record).select("*").single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function revokeTrainingCertificate(id: string, revokedBy: string, reason: string): Promise<TrainingCertificate> {
+  if (isMySqlDatabase()) return mysqlDb.revokeTrainingCertificate(id, revokedBy, reason);
+  const input = { revoked_at: new Date().toISOString(), revoked_by: revokedBy, revoke_reason: reason };
+  const supabase = createSupabaseAdminClient();
+  if (!supabase) {
+    const index = memoryStore.trainingCertificates.findIndex((item) => item.id === id);
+    if (index < 0) throw new Error("培训证书不存在");
+    memoryStore.trainingCertificates[index] = { ...memoryStore.trainingCertificates[index], ...input };
+    return memoryStore.trainingCertificates[index];
+  }
+  const { data, error } = await supabase.from("training_certificates").update(input).eq("id", id).select("*").single();
+  if (error) throw new Error(error.message);
   return data;
 }
 
