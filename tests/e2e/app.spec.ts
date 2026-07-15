@@ -837,10 +837,32 @@ test.describe("天瑞内饰智能客服回归", () => {
     await tryLogin(page);
     await gotoWithRetry(page, "/admin/deploy");
 
-    await expect(page.getByRole("heading", { name: "生产部署检查" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "部署检查" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("tab", { name: /全部/ })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("tab", { name: /待处理/ })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("tab", { name: /已就绪/ })).toBeVisible({ timeout: 30_000 });
+    const moreActions = page.getByRole("button", { name: "更多操作" });
+    await expect(moreActions).toBeVisible({ timeout: 30_000 });
+    await moreActions.click();
     await expect(page.getByRole("link", { name: "上线报告" })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("link", { name: "指标 CSV" })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("link", { name: "运维手册" })).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: "更多操作" }).click();
+
+    await expect(page.getByRole("heading", { name: "检查项" })).toBeVisible({ timeout: 30_000 });
+    const environmentGroup = page.getByRole("button", { name: /环境变量/ });
+    await expect(environmentGroup).toBeVisible({ timeout: 30_000 });
+    await expect(environmentGroup).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByText("登录会话密钥", { exact: true })).toBeVisible({ timeout: 30_000 });
+    const attentionTab = page.getByRole("tab", { name: /待处理/ });
+    await attentionTab.click();
+    await expect(attentionTab).toHaveAttribute("aria-selected", "true");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBeTruthy();
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await gotoWithRetry(page, "/admin/deploy");
+    await expect(page.getByRole("heading", { name: "部署检查" })).toBeVisible({ timeout: 30_000 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBeTruthy();
 
     const readinessResponse = await getWithRetry(page, "/api/admin/deploy-readiness");
     const readiness = await readinessResponse.json();
