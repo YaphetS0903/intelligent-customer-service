@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, Plus, RefreshCw, Save, ShieldCheck, Trash2, UserCheck, Users } from "lucide-react";
+import { Building2, ChevronDown, Loader2, Plus, RefreshCw, Save, Search, ShieldCheck, Trash2, UserCheck, UserPlus, Users } from "lucide-react";
 import type {
   DocumentReviewerAssignment,
   DocumentReviewerType,
@@ -39,6 +39,11 @@ type ReviewerDraft = {
   can_publish: boolean;
 };
 
+type UserAdminView = "accounts" | "reviewers";
+type AccountPanel = "organization" | "new-user" | null;
+
+const INITIAL_VISIBLE_USERS = 10;
+
 const emptyNewUser: NewUserDraft = {
   email: "",
   password: "",
@@ -74,6 +79,11 @@ export function UserAdmin() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<UserAdminView>("accounts");
+  const [accountPanel, setAccountPanel] = useState<AccountPanel>(null);
+  const [reviewerFormOpen, setReviewerFormOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [visibleUsers, setVisibleUsers] = useState(INITIAL_VISIBLE_USERS);
 
   useEffect(() => {
     void loadUsers({ silent: true });
@@ -86,6 +96,20 @@ export function UserAdmin() {
   const positions = useMemo(() => {
     return Array.from(new Set(users.map((user) => user.position).filter(Boolean))).sort();
   }, [users]);
+
+  const filteredUsers = useMemo(() => {
+    const query = searchQuery.trim().toLocaleLowerCase("zh-CN");
+    if (!query) return users;
+
+    return users.filter((user) => [user.name, user.email, user.department, user.position]
+      .some((value) => value.toLocaleLowerCase("zh-CN").includes(query)));
+  }, [searchQuery, users]);
+
+  const displayedUsers = filteredUsers.slice(0, visibleUsers);
+
+  useEffect(() => {
+    setVisibleUsers(INITIAL_VISIBLE_USERS);
+  }, [searchQuery, activeView]);
 
   async function loadUsers({ silent = false }: { silent?: boolean } = {}) {
     setLoading(true);
@@ -215,6 +239,7 @@ export function UserAdmin() {
       }
 
       setNewUser(emptyNewUser);
+      setAccountPanel(null);
       await loadUsers({ silent: true });
       pushToast({
         tone: "success",
@@ -243,6 +268,7 @@ export function UserAdmin() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "创建审批授权失败");
       setReviewerDraft(emptyReviewerDraft);
+      setReviewerFormOpen(false);
       await loadUsers({ silent: true });
       pushToast({ tone: "success", title: "审批授权已创建", description: "该用户可以在指定范围内处理资料审批。" });
     } catch (error) {
@@ -269,29 +295,27 @@ export function UserAdmin() {
   }
 
   return (
-    <div className="space-y-5">
-      <section className="ui-card p-5 shadow-soft">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-start gap-3">
-            <span className="grid size-11 shrink-0 place-items-center rounded-lg bg-cyan/10 text-brand">
-              <Users size={22} />
-            </span>
-            <div>
-              <h1 className="text-xl font-semibold text-ink">用户管理</h1>
-              <p className="mt-1 text-sm text-slate-500">维护员工姓名、部门、岗位和角色，用于知识库与资料权限过滤。</p>
-            </div>
+    <div className="space-y-3 pb-6">
+      <header className="flex flex-col gap-3 border-b border-line pb-3 sm:flex-row sm:items-center sm:justify-between" data-testid="users-header">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-cyan/10 text-brand">
+            <Users size={18} />
+          </span>
+          <div className="min-w-0">
+            <h1 className="text-xl font-semibold text-ink">用户管理</h1>
+            <p className="truncate text-sm text-slate-500">账号、组织、密级与资料审批权限</p>
           </div>
-          <button
-            type="button"
-            onClick={() => void loadUsers()}
-            disabled={loading}
-            className="ui-button-secondary h-10"
-          >
-            {loading ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
-            刷新
-          </button>
         </div>
-      </section>
+        <button
+          type="button"
+          onClick={() => void loadUsers()}
+          disabled={loading}
+          className="ui-button-secondary h-9 self-start px-3 sm:self-auto"
+        >
+          {loading ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
+          刷新
+        </button>
+      </header>
 
       {loadError && (
         <ErrorRetry
@@ -302,24 +326,80 @@ export function UserAdmin() {
         />
       )}
 
-      {(departments.length > 0 || positions.length > 0) && (
-        <section className="ui-card p-4">
-          <div className="space-y-3 text-sm text-slate-600">
-            <TagGroup label="已有部门" items={departments} tone="cyan" />
-            {positions.length > 0 && <TagGroup label="已有岗位" items={positions} tone="emerald" />}
+      <section className="ui-card grid grid-cols-2 gap-1 p-1.5" aria-label="用户与权限视图">
+        <UserViewButton active={activeView === "accounts"} onClick={() => setActiveView("accounts")}>
+          账号管理 · {users.length}
+        </UserViewButton>
+        <UserViewButton active={activeView === "reviewers"} onClick={() => setActiveView("reviewers")}>
+          审批授权 · {reviewerAssignments.length}
+        </UserViewButton>
+      </section>
+
+      {activeView === "accounts" && (
+        <section className="ui-card flex flex-col gap-3 p-3 lg:flex-row lg:items-center" data-testid="account-toolbar">
+          <label className="relative min-w-0 flex-1">
+            <span className="sr-only">搜索用户</span>
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+            <input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="搜索姓名、邮箱、部门或岗位"
+              className="h-10 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm outline-none focus:border-brand"
+            />
+          </label>
+          <span className="shrink-0 text-xs text-slate-500">显示 {Math.min(visibleUsers, filteredUsers.length)} / {filteredUsers.length}</span>
+          <div className="grid grid-cols-2 gap-2 sm:flex">
+            <button
+              type="button"
+              onClick={() => setAccountPanel((current) => current === "organization" ? null : "organization")}
+              className={`ui-button-secondary h-10 px-3 ${accountPanel === "organization" ? "border-cyan text-brand" : ""}`}
+            >
+              <Building2 size={16} />
+              组织字典
+            </button>
+            <button
+              type="button"
+              onClick={() => setAccountPanel((current) => current === "new-user" ? null : "new-user")}
+              className="ui-button-primary h-10 px-3"
+            >
+              <UserPlus size={16} />
+              新增用户
+            </button>
           </div>
         </section>
       )}
 
-      <section className="ui-card p-5">
-        <div className="flex items-start gap-3">
+      {activeView === "accounts" && accountPanel === "organization" && (
+        <section className="ui-card p-4" data-testid="organization-directory">
+          <div className="space-y-3 text-sm text-slate-600">
+            <TagGroup label={`部门 · ${departments.length}`} items={departments} tone="cyan" />
+            <TagGroup label={`岗位 · ${positions.length}`} items={positions} tone="emerald" />
+            {departments.length === 0 && positions.length === 0 && <p>还没有部门或岗位数据。</p>}
+          </div>
+        </section>
+      )}
+
+      {activeView === "reviewers" && (
+      <section className="ui-card p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
           <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-700"><UserCheck size={20} /></span>
-          <div>
+          <div className="min-w-0">
             <h2 className="text-base font-semibold text-ink">资料审批人授权</h2>
-            <p className="mt-1 text-sm text-slate-500">审批角色与系统管理员分开设置，可以限制知识库、部门和资料密级范围。</p>
+            <p className="truncate text-sm text-slate-500">按知识库、部门和资料密级限定审批范围</p>
           </div>
         </div>
+          <button
+            type="button"
+            onClick={() => setReviewerFormOpen((current) => !current)}
+            className="ui-button-primary h-10 self-start px-3 sm:self-auto"
+          >
+            <Plus size={16} />
+            新增审批授权
+          </button>
+        </div>
 
+        {reviewerFormOpen && (
         <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <label className="block">
             <span className="mb-1.5 block text-xs font-medium text-slate-600">审批人</span>
@@ -370,6 +450,7 @@ export function UserAdmin() {
             </button>
           </div>
         </div>
+        )}
 
         <div className="mt-5 border-t border-line pt-4">
           <h3 className="text-sm font-semibold text-ink">现有审批授权</h3>
@@ -399,8 +480,10 @@ export function UserAdmin() {
           ) : <p className="mt-3 rounded-lg border border-dashed border-line px-4 py-6 text-center text-sm text-slate-500">还没有配置审批人，当前仅系统管理员可以处理审批。</p>}
         </div>
       </section>
+      )}
 
-      <section className="ui-card p-5">
+      {activeView === "accounts" && accountPanel === "new-user" && (
+      <section className="ui-card p-4" data-testid="new-user-panel">
         <div className="flex items-center gap-2">
           <Plus size={18} className="text-brand" />
           <h2 className="text-base font-semibold text-ink">新增用户</h2>
@@ -470,8 +553,9 @@ export function UserAdmin() {
           </button>
         </div>
       </section>
+      )}
 
-      {loading && users.length === 0 ? (
+      {activeView === "accounts" && (loading && users.length === 0 ? (
         <section className="grid gap-3 xl:grid-cols-2">
           <PanelSkeleton rows={3} />
           <PanelSkeleton rows={3} />
@@ -479,7 +563,7 @@ export function UserAdmin() {
       ) : (
         <>
           <section className="grid gap-3 xl:hidden">
-            {users.map((user) => (
+            {displayedUsers.map((user) => (
               <UserMobileCard
                 key={user.id}
                 user={user}
@@ -489,7 +573,7 @@ export function UserAdmin() {
                 onSave={() => void saveUser(user)}
               />
             ))}
-            {users.length === 0 && <EmptyUsers />}
+            {filteredUsers.length === 0 && <EmptyUsers searchQuery={searchQuery} />}
           </section>
 
           <section className="hidden overflow-hidden ui-card xl:block">
@@ -510,7 +594,7 @@ export function UserAdmin() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
-                  {users.map((user) => {
+                  {displayedUsers.map((user) => {
                     const draft = drafts[user.id] ?? createDraftFromUser(user);
 
                     return (
@@ -585,10 +669,10 @@ export function UserAdmin() {
                       </tr>
                     );
                   })}
-                  {users.length === 0 && (
+                  {filteredUsers.length === 0 && (
                     <tr>
                       <td colSpan={10} className="px-4 py-8 text-center text-sm text-slate-500">
-                        暂无用户。员工首次登录或注册后会自动出现在这里。
+                        {searchQuery ? "没有匹配的用户。" : "暂无用户。员工首次登录或注册后会自动出现在这里。"}
                       </td>
                     </tr>
                   )}
@@ -596,8 +680,9 @@ export function UserAdmin() {
               </table>
             </div>
           </section>
+          <UserListPager total={filteredUsers.length} visible={visibleUsers} onChange={setVisibleUsers} />
         </>
-      )}
+      ))}
 
       <datalist id="department-suggestions">
         {departments.map((department) => (
@@ -879,10 +964,46 @@ function AdminLockedPill() {
   );
 }
 
-function EmptyUsers() {
+function UserViewButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`h-10 rounded-md px-3 text-sm font-semibold transition ${active ? "bg-brand text-white" : "text-slate-600 hover:bg-slate-100"}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function UserListPager({ total, visible, onChange }: { total: number; visible: number; onChange: (value: number) => void }) {
+  if (total <= INITIAL_VISIBLE_USERS) return null;
+
+  const hasMore = visible < total;
+  const nextCount = Math.min(total, visible + INITIAL_VISIBLE_USERS);
+
+  return (
+    <div className="flex items-center justify-center gap-2 border-t border-line pt-3">
+      {hasMore && (
+        <button type="button" onClick={() => onChange(nextCount)} className="ui-button-secondary h-9 px-3 text-xs">
+          再显示 {nextCount - visible} 个
+          <ChevronDown size={14} />
+        </button>
+      )}
+      {visible > INITIAL_VISIBLE_USERS && (
+        <button type="button" onClick={() => onChange(INITIAL_VISIBLE_USERS)} className="ui-button-secondary h-9 px-3 text-xs">
+          收起列表
+        </button>
+      )}
+      <span className="text-xs text-slate-500">共 {total} 个</span>
+    </div>
+  );
+}
+
+function EmptyUsers({ searchQuery = "" }: { searchQuery?: string }) {
   return (
     <section className="ui-card border-dashed p-8 text-center text-sm text-slate-500">
-      暂无用户。员工首次登录或注册后会自动出现在这里。
+      {searchQuery ? "没有匹配的用户。" : "暂无用户。员工首次登录或注册后会自动出现在这里。"}
     </section>
   );
 }

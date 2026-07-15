@@ -501,9 +501,15 @@ test.describe("天瑞内饰智能客服回归", () => {
     await tryLogin(page);
     await gotoWithRetry(page, "/admin/users");
     await expect(page.getByRole("heading", { name: "用户管理" })).toBeVisible();
+    await expect(page.getByPlaceholder("搜索姓名、邮箱、部门或岗位")).toBeVisible();
+    await expect(page.getByRole("button", { name: "新增用户" })).toBeVisible();
+    const usersHeaderBox = await page.getByTestId("users-header").boundingBox();
+    expect(usersHeaderBox?.height ?? 999).toBeLessThanOrEqual(80);
+    await page.getByRole("button", { name: /^审批授权 · \d+$/ }).click();
     await expect(page.getByRole("heading", { name: "资料审批人授权" })).toBeVisible();
-    await expect(page.getByText("安全密级").first()).toBeVisible();
+    await page.getByRole("button", { name: "新增审批授权" }).click();
     await expect(page.getByRole("button", { name: "添加授权" })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
   });
 
   test("会话反馈后台包含安全审计和工单入口", async ({ page }) => {
