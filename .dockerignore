@@ -12,5 +12,7 @@ backups
 test-results
 playwright-report
 *.log
+*.md
+*.txt
 winmail_openapi_1.2
 三期3A首批系统接入开发规划.md
