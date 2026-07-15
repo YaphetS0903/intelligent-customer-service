@@ -1,4 +1,5 @@
 import { expect, test, type APIResponse, type Page } from "@playwright/test";
+import { signWinmailParams } from "../../lib/integrations/providers/winmail/client";
 
 let demoSeedPromise: Promise<void> | null = null;
 
@@ -470,6 +471,7 @@ test.describe("天瑞内饰智能客服回归", () => {
     await menuButton.click();
     await expect(page.getByRole("navigation", { name: "移动端主导航" })).toBeVisible();
     await expect(page.getByRole("link", { name: "系统配置" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "业务集成" })).toBeVisible();
     await expect(page.getByRole("link", { name: "审计与工单" })).toHaveAttribute("aria-current", "page");
   });
 
@@ -743,6 +745,46 @@ test.describe("天瑞内饰智能客服回归", () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBeTruthy();
     await page.locator("#settings-group-select").selectOption({ label: "OCR 扫描件识别" });
     await expect(page.getByRole("heading", { name: "OCR 扫描件识别" })).toBeVisible({ timeout: 30_000 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBeTruthy();
+  });
+
+  test("Winmail 签名算法与 OpenAPI 1.2 文档一致", () => {
+    const signed = signWinmailParams(
+      { method: "login", user: "test", pass: "123456" },
+      "ec880a9d4b",
+      "aff54e78f6871aea3714a3916eb35199b7affb19",
+      1455764753
+    );
+    expect(signed.sign).toBe("496c4156bc32ca11fe81899e1b6a242c");
+  });
+
+  test("业务集成页展示企业微信与 Winmail 安全配置", async ({ page }) => {
+    await tryLogin(page);
+    const response = await getWithRetry(page, "/api/admin/integrations", 5);
+    const data = await response.json();
+    expect(data.connectors.map((item: { provider: string }) => item.provider)).toEqual(expect.arrayContaining(["wecom", "winmail"]));
+    expect(data.configs.wecom).not.toHaveProperty("corpSecret");
+    expect(data.configs.winmail).not.toHaveProperty("apiSecret");
+    expect(data.configs.winmail).not.toHaveProperty("senderPassword");
+
+    await gotoWithRetry(page, "/admin/integrations");
+    await expect(page.getByRole("heading", { name: "业务集成" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("button", { name: "连接器" })).toBeVisible();
+    const wecomPanel = page.locator("article").filter({ hasText: "企业微信通讯录" });
+    await expect(wecomPanel).toHaveCount(1);
+    await wecomPanel.locator("summary").click();
+    await expect(wecomPanel.getByText("CorpSecret", { exact: true })).toBeVisible();
+    await expect(wecomPanel.getByRole("button", { name: "同步企业微信通讯录" })).toBeVisible();
+    const winmailPanel = page.locator("article").filter({ hasText: "Winmail 邮件通知" });
+    await expect(winmailPanel).toHaveCount(1);
+    await winmailPanel.locator("summary").click();
+    await expect(winmailPanel.getByText("ApiSecret", { exact: true })).toBeVisible();
+    await expect(winmailPanel.getByRole("button", { name: "发送测试邮件" })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBeTruthy();
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await gotoWithRetry(page, "/admin/integrations");
+    await expect(page.getByRole("heading", { name: "业务集成" })).toBeVisible({ timeout: 30_000 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBeTruthy();
   });
 

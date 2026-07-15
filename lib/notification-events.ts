@@ -1,4 +1,4 @@
-import { createNotification, listUsers } from "@/lib/db";
+import { createNotification, getUserProfile, listUsers } from "@/lib/db";
 import {
   configuredNotificationChannels,
   deliverNotificationExternally
@@ -31,7 +31,8 @@ export async function notifyUsers(userIds: Array<string | null | undefined>, pay
       `notification:${payload.dedupe_key ?? payload.source_id}:${userId}`
     );
     if (externalChannels.length > 0) {
-      const delivery = await deliverNotificationExternally(notification);
+      const recipient = externalChannels.includes("winmail") ? await getUserProfile(userId) : null;
+      const delivery = await deliverNotificationExternally(notification, recipient ?? undefined);
       const failures = delivery.filter((item) => !item.ok);
       if (failures.length > 0) {
         console.warn("[notification:external-delivery]", failures);

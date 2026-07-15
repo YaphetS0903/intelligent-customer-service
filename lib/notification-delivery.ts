@@ -1,17 +1,20 @@
 import { env } from "@/lib/config";
+import { getWinmailConfig } from "@/lib/integrations/config";
+import { deliverWinmailEmail } from "@/lib/integrations/providers/winmail/delivery";
 import type { AppNotification } from "@/lib/types";
 
-export type NotificationDeliveryChannel = "webhook" | "email_webhook" | "wecom_webhook";
+export type NotificationDeliveryChannel = "webhook" | "email_webhook" | "wecom_webhook" | "winmail";
 
 export function configuredNotificationChannels(): NotificationDeliveryChannel[] {
   return [
     env.notificationWebhookUrl ? "webhook" : null,
     env.notificationEmailWebhookUrl ? "email_webhook" : null,
-    env.notificationWecomWebhookUrl ? "wecom_webhook" : null
+    env.notificationWecomWebhookUrl ? "wecom_webhook" : null,
+    getWinmailConfig().enabled && getWinmailConfig().notificationEnabled ? "winmail" : null
   ].filter((channel): channel is NotificationDeliveryChannel => Boolean(channel));
 }
 
-export async function deliverNotificationExternally(notification: AppNotification) {
+export async function deliverNotificationExternally(notification: AppNotification, recipient?: { email?: string | null }) {
   const tasks: Array<Promise<{ channel: NotificationDeliveryChannel; ok: boolean; error?: string }>> = [];
 
   if (env.notificationWebhookUrl) {
@@ -32,6 +35,18 @@ export async function deliverNotificationExternally(notification: AppNotificatio
         content: `**${notification.title}**\n${notification.body}${notification.href ? `\n[打开详情](${absoluteHref(notification.href)})` : ""}`
       }
     }));
+  }
+  const winmail = getWinmailConfig();
+  if (winmail.enabled && winmail.notificationEnabled && recipient?.email) {
+    tasks.push(deliverWinmailEmail({
+      notificationId: notification.id,
+      dedupeKey: notification.dedupe_key,
+      recipientUserId: notification.user_id,
+      recipientEmail: recipient.email,
+      subject: notification.title,
+      text: `${notification.body}${notification.href ? `\n\n查看详情：${absoluteHref(notification.href)}` : ""}`,
+      metadata: { source_type: notification.source_type, source_id: notification.source_id }
+    }).then((result) => ({ channel: "winmail" as const, ok: result.ok, error: result.error })));
   }
 
   return Promise.all(tasks);
