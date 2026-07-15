@@ -679,20 +679,17 @@ test.describe("天瑞内饰智能客服回归", () => {
       body: healthBody
     }));
     await gotoWithRetry(page, "/admin/settings");
-    await expectEnabledWithReload(page, "/admin/settings", /OCR JSON Base64/, 3);
+    await expect(page.getByRole("heading", { name: "系统配置" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("tab", { name: "服务配置" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "运行检查" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "自定义对话模型" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("button", { name: "测试模型" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("备用 1 模型 ID", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("服务商预设模板")).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "选择一个配置类别" })).toHaveCount(0);
 
-    await expect(page.getByRole("heading", { name: "系统配置向导" })).toBeVisible();
-    await expect(page.getByText("数字人接口测试")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByRole("button", { name: "测试数字人" })).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText("TTS 语音试听")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByRole("button", { name: "试听语音" })).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText("服务商预设模板")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByRole("button", { name: /OCR JSON Base64/ })).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByRole("heading", { name: "选择一个配置类别" })).toBeVisible({ timeout: 30_000 });
-
-    await expect(page.getByRole("button", { name: /OCR JSON Base64/ })).toBeEnabled({ timeout: 60_000 });
-    await page.getByRole("button", { name: /OCR JSON Base64/ }).click();
-    await expect(page.getByRole("heading", { name: "多模态文件识别配置" })).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: /OCR 扫描件识别/ }).click();
+    await expect(page.getByRole("heading", { name: "OCR 扫描件识别" })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("button", { name: "测试 OCR" })).toBeVisible({ timeout: 30_000 });
 
     await expect(page.getByRole("button", { name: /LDAP \/ AD 登录/ })).toBeEnabled({ timeout: 60_000 });
@@ -700,21 +697,37 @@ test.describe("天瑞内饰智能客服回归", () => {
     await expect(page.getByText("用户 DN 模板", { exact: true })).toBeVisible({ timeout: 30_000 });
 
     await page.getByRole("button", { name: /自定义数据库/ }).click();
-    await expect(page.getByText("登录会话密钥")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("登录会话密钥", { exact: true })).toBeVisible({ timeout: 30_000 });
 
     await page.getByRole("button", { name: /应用参数/ }).click();
     await expect(page.getByText("应用地址")).toBeVisible({ timeout: 30_000 });
 
     await page.getByRole("button", { name: /自定义对话模型/ }).click();
-    await expect(page.getByText("备用 1 Provider", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("备用 1 供应商", { exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("备用 1 模型 ID", { exact: true })).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText("备用 2 Provider", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("备用 2 供应商", { exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("备用 2 模型 ID", { exact: true })).toBeVisible({ timeout: 30_000 });
 
     await page.getByRole("button", { name: /自定义语音 TTS/ }).click();
     await expect(page.getByText("认证头名").first()).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("额外请求头 JSON").first()).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("请求体模板 JSON").first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("button", { name: "试听语音" })).toBeVisible({ timeout: 30_000 });
+
+    await page.getByRole("button", { name: /数字人视频/ }).click();
+    await expect(page.getByRole("heading", { name: "数字人视频" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("button", { name: "测试数字人" })).toBeVisible({ timeout: 30_000 });
+
+    await page.getByRole("tab", { name: "运行检查" }).click();
+    await expect(page.getByTestId("settings-health")).toBeVisible({ timeout: 30_000 });
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await gotoWithRetry(page, "/admin/settings");
+    await expect(page.getByRole("heading", { name: "系统配置" })).toBeVisible({ timeout: 30_000 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBeTruthy();
+    await page.locator("#settings-group-select").selectOption({ label: "OCR 扫描件识别" });
+    await expect(page.getByRole("heading", { name: "OCR 扫描件识别" })).toBeVisible({ timeout: 30_000 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBeTruthy();
   });
 
   test("问答测试后台暴露整改复测队列和趋势数据", async ({ page }) => {
