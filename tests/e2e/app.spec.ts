@@ -516,7 +516,13 @@ test.describe("天瑞内饰智能客服回归", () => {
     await expect(page.getByRole("button", { name: "人工工单" })).toBeVisible({ timeout: 30_000 });
     const securityTab = page.getByRole("button", { name: /^安全审计( · \d+)?$/ });
     await expect(securityTab).toBeVisible({ timeout: 30_000 });
-    await expectTextWithReload(page, "/admin/insights", "运营告警");
+    await expect(page.getByTestId("metrics-overview")).toBeVisible();
+    await expect(page.locator('[data-testid^="primary-metric-"]')).toHaveCount(4);
+    const metricsDetails = page.getByTestId("metrics-details");
+    await expect(metricsDetails.getByText("查看全部指标")).toBeVisible();
+    await metricsDetails.locator("summary").click();
+    await expect(metricsDetails.getByText("运营告警")).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
     await expectEnabledWithReload(page, "/admin/insights", /刷新/);
     await securityTab.click();
     await expect(page.getByRole("heading", { name: "安全审计覆盖范围" })).toBeVisible({ timeout: 30_000 });

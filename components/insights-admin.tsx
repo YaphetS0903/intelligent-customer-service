@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Clock3, ClipboardCheck, Coins, ExternalLink, FilePlus2, ListTodo, Loader2, Lock, MessageSquare, RefreshCw, Send, ShieldAlert, ThumbsDown, ThumbsUp, TrendingUp, UserRound } from "lucide-react";
+import { AlertTriangle, ChevronDown, Clock3, ClipboardCheck, Coins, ExternalLink, FilePlus2, ListTodo, Loader2, Lock, MessageSquare, RefreshCw, Send, ShieldAlert, ThumbsDown, ThumbsUp, TrendingUp, UserRound } from "lucide-react";
 import type { AdminInsights, ConversationInsight, FeedbackInsight, KnowledgeGap, OperationAlert, QaRemediationTask, SecurityEventInsight, ServiceTicketInsight } from "@/lib/insights";
 import type { Citation, KnowledgeBase, KnowledgeTask, ServiceTicketPriority, WorkStatus } from "@/lib/types";
 import { fetchWithRetry } from "@/lib/client-fetch";
@@ -531,29 +531,80 @@ export function InsightsAdmin() {
 
       {insights && (
         <>
-          <section className="grid gap-3 md:grid-cols-4 xl:grid-cols-12">
-            <Metric label="会话" value={insights.totals.conversations} />
-            <Metric label="消息" value={insights.totals.messages} />
-            <Metric label="反馈" value={insights.totals.feedback} />
-            <Metric label="工单" value={insights.totals.tickets} />
-            <Metric label="待办工单" value={insights.totals.pendingTickets} tone="warn" />
-            <Metric label="超时工单" value={insights.totals.overdueTickets} tone={insights.totals.overdueTickets > 0 ? "bad" : "good"} />
-            <Metric label="安全事件" value={insights.totals.securityEvents} tone="bad" />
-            <Metric label="待审安全" value={insights.totals.openSecurityEvents} tone="warn" />
-            <Metric label="高危告警" value={insights.totals.highRiskSecurityEvents + insights.totals.criticalSecurityEvents} tone="bad" />
-            <Metric label="点赞" value={insights.totals.likes} tone="good" />
-            <Metric label="点踩" value={insights.totals.dislikes} tone="bad" />
-            <Metric label="无引用回答" value={insights.totals.unreferencedAnswers} tone="warn" />
-            <Metric label="模型调用" value={insights.totals.modelUsageEvents} />
-            <Metric label="Token" value={formatTokenNumber(insights.totals.modelTokens)} />
-            <Metric label="估算用量" value={insights.totals.estimatedModelUsageEvents} tone={insights.totals.estimatedModelUsageEvents > 0 ? "warn" : "good"} />
-            <Metric label="成本" value={formatUsd(insights.totals.modelCostUsd)} />
-            <Metric label="热门问题" value={insights.totals.popularQuestions} />
-            <Metric label="运营告警" value={insights.totals.operationAlerts} tone={insights.totals.operationAlerts > 0 ? "warn" : "good"} />
-            <Metric label="待补充知识" value={insights.totals.knowledgeGaps} tone="warn" />
-            <Metric label="QA 整改" value={insights.totals.qaRemediationTasks} tone="warn" />
-            <Metric label="待处理" value={insights.totals.pendingWork} tone="warn" />
-            <Metric label="已处理" value={insights.totals.resolvedWork} tone="good" />
+          <section className="space-y-3" data-testid="metrics-overview">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <PrimaryMetric
+                testId="primary-metric-pending-work"
+                icon={ListTodo}
+                label="待处理事项"
+                value={insights.totals.pendingWork}
+                helper={`已处理 ${insights.totals.resolvedWork} 项`}
+                tone="warn"
+              />
+              <PrimaryMetric
+                testId="primary-metric-ticket-risk"
+                icon={Clock3}
+                label="待办工单"
+                value={insights.totals.pendingTickets}
+                helper={`其中超时 ${insights.totals.overdueTickets} 项`}
+                tone={insights.totals.overdueTickets > 0 ? "bad" : "good"}
+              />
+              <PrimaryMetric
+                testId="primary-metric-security-risk"
+                icon={ShieldAlert}
+                label="待审安全事件"
+                value={insights.totals.openSecurityEvents}
+                helper={`高危及严重 ${insights.totals.highRiskSecurityEvents + insights.totals.criticalSecurityEvents} 项`}
+                tone={insights.totals.openSecurityEvents > 0 ? "bad" : "good"}
+              />
+              <PrimaryMetric
+                testId="primary-metric-knowledge-quality"
+                icon={ClipboardCheck}
+                label="待完善知识"
+                value={insights.totals.knowledgeGaps + insights.totals.qaRemediationTasks}
+                helper={`知识缺口 ${insights.totals.knowledgeGaps} · QA 整改 ${insights.totals.qaRemediationTasks}`}
+                tone={insights.totals.knowledgeGaps + insights.totals.qaRemediationTasks > 0 ? "warn" : "good"}
+              />
+            </div>
+
+            <details className="ui-card group overflow-hidden" data-testid="metrics-details">
+              <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40 [&::-webkit-details-marker]:hidden">
+                <span>查看全部指标</span>
+                <ChevronDown className="size-4 shrink-0 text-slate-500 transition-transform duration-200 group-open:rotate-180" aria-hidden="true" />
+              </summary>
+              <div className="grid border-t border-line md:grid-cols-2 xl:grid-cols-4">
+                <MetricGroup title="业务规模" testId="metric-group-business">
+                  <Metric label="会话" value={insights.totals.conversations} />
+                  <Metric label="消息" value={insights.totals.messages} />
+                  <Metric label="反馈" value={insights.totals.feedback} />
+                  <Metric label="工单" value={insights.totals.tickets} />
+                  <Metric label="热门问题" value={insights.totals.popularQuestions} />
+                </MetricGroup>
+                <MetricGroup title="问答质量" testId="metric-group-quality">
+                  <Metric label="点赞" value={insights.totals.likes} tone="good" />
+                  <Metric label="点踩" value={insights.totals.dislikes} tone="bad" />
+                  <Metric label="无引用回答" value={insights.totals.unreferencedAnswers} tone="warn" />
+                  <Metric label="待补充知识" value={insights.totals.knowledgeGaps} tone="warn" />
+                  <Metric label="QA 整改" value={insights.totals.qaRemediationTasks} tone="warn" />
+                </MetricGroup>
+                <MetricGroup title="模型用量" testId="metric-group-usage">
+                  <Metric label="模型调用" value={insights.totals.modelUsageEvents} />
+                  <Metric label="Token" value={formatTokenNumber(insights.totals.modelTokens)} />
+                  <Metric label="估算用量" value={insights.totals.estimatedModelUsageEvents} tone={insights.totals.estimatedModelUsageEvents > 0 ? "warn" : "good"} />
+                  <Metric label="成本" value={formatUsd(insights.totals.modelCostUsd)} />
+                </MetricGroup>
+                <MetricGroup title="整改闭环" testId="metric-group-remediation">
+                  <Metric label="待办工单" value={insights.totals.pendingTickets} tone="warn" />
+                  <Metric label="超时工单" value={insights.totals.overdueTickets} tone={insights.totals.overdueTickets > 0 ? "bad" : "good"} />
+                  <Metric label="安全事件" value={insights.totals.securityEvents} tone="bad" />
+                  <Metric label="待审安全" value={insights.totals.openSecurityEvents} tone="warn" />
+                  <Metric label="高危告警" value={insights.totals.highRiskSecurityEvents + insights.totals.criticalSecurityEvents} tone="bad" />
+                  <Metric label="运营告警" value={insights.totals.operationAlerts} tone={insights.totals.operationAlerts > 0 ? "warn" : "good"} />
+                  <Metric label="待处理" value={insights.totals.pendingWork} tone="warn" />
+                  <Metric label="已处理" value={insights.totals.resolvedWork} tone="good" />
+                </MetricGroup>
+              </div>
+            </details>
           </section>
 
           {activeTab === "conversations" && (
@@ -2076,14 +2127,61 @@ function normalizeMissingKeywords(value: string) {
   return value;
 }
 
-function Metric({ label, value, tone }: { label: string; value: React.ReactNode; tone?: "good" | "bad" | "warn" }) {
+type MetricTone = "good" | "bad" | "warn";
+
+function PrimaryMetric({
+  icon: Icon,
+  label,
+  value,
+  helper,
+  tone,
+  testId
+}: {
+  icon: typeof ListTodo;
+  label: string;
+  value: React.ReactNode;
+  helper: string;
+  tone?: MetricTone;
+  testId: string;
+}) {
+  const toneClass =
+    tone === "good" ? "text-emerald-700" : tone === "bad" ? "text-red-700" : tone === "warn" ? "text-amber-700" : "text-ink";
+  const iconClass =
+    tone === "good" ? "bg-emerald-50 text-emerald-700" : tone === "bad" ? "bg-red-50 text-red-700" : tone === "warn" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-700";
+
+  return (
+    <article className="ui-card min-w-0 p-4" data-testid={testId}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-slate-600">{label}</p>
+          <p className={`mt-2 text-3xl font-semibold tabular-nums ${toneClass}`}>{value}</p>
+        </div>
+        <span className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${iconClass}`}>
+          <Icon className="size-4" aria-hidden="true" />
+        </span>
+      </div>
+      <p className="mt-3 break-words text-xs leading-5 text-slate-500">{helper}</p>
+    </article>
+  );
+}
+
+function MetricGroup({ title, testId, children }: { title: string; testId: string; children: React.ReactNode }) {
+  return (
+    <section className="min-w-0 border-b border-line p-4 last:border-b-0 md:odd:border-r xl:border-b-0 xl:not-last:border-r" data-testid={testId}>
+      <h3 className="mb-2 text-xs font-semibold text-slate-500">{title}</h3>
+      <dl className="divide-y divide-line/70">{children}</dl>
+    </section>
+  );
+}
+
+function Metric({ label, value, tone }: { label: string; value: React.ReactNode; tone?: MetricTone }) {
   const toneClass =
     tone === "good" ? "text-emerald-700" : tone === "bad" ? "text-red-700" : tone === "warn" ? "text-amber-700" : "text-ink";
 
   return (
-    <div className="ui-card p-4">
-      <p className="text-xs font-medium text-slate-500">{label}</p>
-      <p className={`mt-2 text-2xl font-semibold ${toneClass}`}>{value}</p>
+    <div className="flex min-w-0 items-center justify-between gap-3 py-2.5">
+      <dt className="min-w-0 break-words text-sm text-slate-600">{label}</dt>
+      <dd className={`shrink-0 text-sm font-semibold tabular-nums ${toneClass}`}>{value}</dd>
     </div>
   );
 }
