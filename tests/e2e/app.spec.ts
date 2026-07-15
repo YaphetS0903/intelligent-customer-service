@@ -838,6 +838,9 @@ test.describe("天瑞内饰智能客服回归", () => {
     await gotoWithRetry(page, "/admin/deploy");
 
     await expect(page.getByRole("heading", { name: "部署检查" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("ACTIVE MODE", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("SECURE SESSION", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "退出登录" })).toBeVisible();
     await expect(page.getByRole("tab", { name: /全部/ })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("tab", { name: /待处理/ })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("tab", { name: /已就绪/ })).toBeVisible({ timeout: 30_000 });

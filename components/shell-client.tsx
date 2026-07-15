@@ -186,30 +186,7 @@ export function ShellClient({
           )}
         </Link>
 
-        <div className={`ui-command-panel relative mt-3 shrink-0 py-2.5 ${collapsed ? "px-2" : "px-3"}`}>
-          {collapsed ? (
-            <div className="flex justify-center">
-              <span className="inline-flex size-8 items-center justify-center rounded-full bg-mint/10 text-xs font-semibold text-emerald-700 ring-1 ring-mint/25">
-                ON
-              </span>
-            </div>
-          ) : (
-            <>
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-medium text-muted">ACTIVE MODE</p>
-                  <p className="mt-1 text-sm font-semibold text-ink">{isAdmin ? "管理员工作台" : "员工服务台"}</p>
-                </div>
-                <span className="inline-flex h-7 items-center rounded-full bg-mint/10 px-2 text-xs font-semibold text-emerald-700 ring-1 ring-mint/25">
-                  ONLINE
-                </span>
-              </div>
-              <div className="ui-signal-line mt-3" />
-            </>
-          )}
-        </div>
-
-        <nav className="scrollbar-thin relative mt-3 min-h-0 flex-1 space-y-4 overflow-y-auto pb-2 pr-1" aria-label="主导航">
+        <nav className="scrollbar-thin relative mt-5 min-h-0 flex-1 space-y-4 overflow-y-auto pb-2 pr-1" aria-label="主导航">
           {visibleNavGroups.map((group) => (
             <div key={group.label} className="space-y-1">
               {!collapsed && (
