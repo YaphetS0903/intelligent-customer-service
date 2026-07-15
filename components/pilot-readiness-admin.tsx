@@ -185,7 +185,7 @@ export function PilotReadinessAdmin() {
 
       {readiness && (
         <>
-          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="pilot-primary-metrics">
+          <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" data-testid="pilot-primary-metrics">
             <Metric label="验收得分" value={`${readiness.summary.score}%`} highlight />
             <Metric label="已就绪" value={readiness.summary.ready} />
             <Metric label="待完善" value={readiness.summary.warning} />
@@ -383,7 +383,7 @@ function EmptyState({ text }: { text: string }) {
 function PilotReadinessSkeleton() {
   return (
     <div className="space-y-5" aria-label="正在加载试运行验收">
-      <section className="grid gap-3 md:grid-cols-5">
+      <section className="grid grid-cols-2 gap-3 md:grid-cols-5">
         {Array.from({ length: 5 }).map((_, index) => (
           <PanelSkeleton key={index} rows={1} className="shadow-none" />
         ))}

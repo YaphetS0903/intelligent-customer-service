@@ -1210,7 +1210,7 @@ function TrainingReadiness({
 
   return (
     <section className="space-y-2" data-testid="training-readiness">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <Metric label="课程" value={stats.total} />
         <Metric label="可用" value={stats.ready} tone="good" />
         <Metric label="已发布" value={stats.published} tone="good" />

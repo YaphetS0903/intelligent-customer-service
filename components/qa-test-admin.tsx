@@ -1660,7 +1660,7 @@ export function QaTestAdmin() {
 
       {!showInitialSkeleton && !showInitialError && (
         <>
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="qa-primary-metrics">
+      <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" data-testid="qa-primary-metrics">
         <Metric label="测试总数" value={stats.total} />
         <Metric label="已运行" value={stats.withAnswer} />
         <Metric label="通过率" value={`${stats.passRate}%`} />
@@ -2009,7 +2009,7 @@ export function QaTestAdmin() {
 function QaTestAdminSkeleton() {
   return (
     <div className="space-y-5" aria-label="问答测试加载中">
-      <section className="grid gap-3 md:grid-cols-4">
+      <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {Array.from({ length: 8 }).map((_, index) => (
           <div key={index} className="ui-card p-4">
             <div className="animate-pulse space-y-3">

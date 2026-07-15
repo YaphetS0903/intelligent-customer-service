@@ -1893,7 +1893,7 @@ export function AdminDashboard() {
             </button>
             )}
           </div>
-          <div className="mt-4 grid gap-3 md:grid-cols-4">
+          <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
             <DocumentMetric label="全部资料" value={activeDocumentStats.total} />
             <DocumentMetric label="可检索" value={activeDocumentStats.ready} tone="good" />
             <DocumentMetric label="处理中" value={activeDocumentStats.uploading + activeDocumentStats.processing} tone="warn" />
