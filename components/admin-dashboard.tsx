@@ -285,6 +285,7 @@ export function AdminDashboard() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<AdminConfirmDialogState | null>(null);
+  const [activeView, setActiveView] = useState<"files" | "settings" | "governance">("files");
 
   function requestAdminConfirm(input: ActionConfirmRequest) {
     return new Promise<boolean>((resolve) => {
@@ -1684,12 +1685,11 @@ export function AdminDashboard() {
 
   return (
     <>
-    <div className="space-y-5">
-      <section className="ui-card p-5 shadow-soft">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
+    <div className="space-y-3 pb-6">
+      <header className="flex flex-col gap-3 border-b border-line pb-3 md:flex-row md:items-center md:justify-between" data-testid="knowledge-header">
+          <div className="min-w-0">
             <h1 className="text-xl font-semibold text-ink">知识管理</h1>
-            <p className="mt-1 text-sm text-slate-500">创建托管知识库，上传企业资料，供员工对话时检索。</p>
+            <p className="truncate text-sm text-slate-500">知识库、资料入库、权限发布与分片治理</p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <div className="rounded-lg bg-cyan/10 px-3 py-2 text-sm text-brand">
@@ -1711,8 +1711,7 @@ export function AdminDashboard() {
               </button>
             )}
           </div>
-        </div>
-      </section>
+      </header>
 
       {initialLoading && <DocumentsAdminSkeleton />}
 
@@ -1730,6 +1729,14 @@ export function AdminDashboard() {
 
       {!initialLoading && (!loadError || hasLoadedContent) && (
         <>
+          <section className="ui-card grid grid-cols-3 gap-1 p-1.5" aria-label="知识管理视图">
+            <KnowledgeViewButton active={activeView === "files"} onClick={() => setActiveView("files")}>资料管理 · {activeDocuments.length}</KnowledgeViewButton>
+            <KnowledgeViewButton active={activeView === "settings"} onClick={() => setActiveView("settings")}>知识库与权限</KnowledgeViewButton>
+            <KnowledgeViewButton active={activeView === "governance"} onClick={() => setActiveView("governance")}>质量与治理</KnowledgeViewButton>
+          </section>
+
+          {activeView === "settings" && (
+          <>
           <UploadReadiness
             activeKb={activeKb}
             stats={activeDocumentStats}
@@ -1738,7 +1745,7 @@ export function AdminDashboard() {
             provisioning={provisioning}
           />
 
-          <div className="grid min-w-0 gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
+          <div className="min-w-0 max-w-4xl">
         <section className="min-w-0 space-y-5">
           <div className="ui-card p-5">
           <div className="flex items-center gap-2">
@@ -1862,12 +1869,18 @@ export function AdminDashboard() {
           </div>
         </section>
 
-        <section className="ui-card min-w-0 p-5">
+          </div>
+          </>
+          )}
+
+        {activeView !== "settings" && (
+        <section className={activeView === "files" ? "ui-card min-w-0 p-5" : "min-w-0 space-y-3"}>
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex items-center gap-2">
               <FileUp size={18} className="text-brand" />
-              <h2 className="text-base font-semibold text-ink">上传资料</h2>
+              <h2 className="text-base font-semibold text-ink">{activeView === "files" ? "资料入库与发布" : "资料质量与分片治理"}</h2>
             </div>
+            {activeView === "files" && (
             <button
               type="button"
               onClick={() => void refreshDocumentStatuses()}
@@ -1878,6 +1891,7 @@ export function AdminDashboard() {
               {refreshing ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
               刷新状态
             </button>
+            )}
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-4">
             <DocumentMetric label="全部资料" value={activeDocumentStats.total} />
@@ -1885,6 +1899,8 @@ export function AdminDashboard() {
             <DocumentMetric label="处理中" value={activeDocumentStats.uploading + activeDocumentStats.processing} tone="warn" />
             <DocumentMetric label="失败" value={activeDocumentStats.failed} tone="bad" />
           </div>
+          {activeView === "files" && (
+          <>
           <form
             className="mt-4 grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_160px]"
             onSubmit={(event) => {
@@ -1942,6 +1958,10 @@ export function AdminDashboard() {
           <div className="mt-3 rounded-lg border border-cyan/20 bg-cyan/10 px-3 py-2 text-sm text-brand">
             新资料默认草稿。解析完成后，请在“权限治理”中提交审核并审核发布，发布后才会进入员工端检索。
           </div>
+          </>
+          )}
+          {activeView === "governance" && (
+          <>
           {ocrStatus && (
             <OcrStatusPanel
               status={ocrStatus}
@@ -2000,7 +2020,11 @@ export function AdminDashboard() {
             audits={activeGovernanceAudits.slice(0, 12)}
             onOpen={(item) => openGovernanceAudit(item)}
           />
+          </>
+          )}
 
+          {activeView === "files" && (
+          <>
           {selectedDocuments.length > 0 && (
             <div className="mt-4 rounded-lg border border-cyan/20 bg-cyan/5 px-3 py-3">
               <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
@@ -2510,8 +2534,10 @@ export function AdminDashboard() {
               )}
             </div>
           </div>
+          </>
+          )}
         </section>
-          </div>
+        )}
         </>
       )}
     </div>
@@ -2521,6 +2547,14 @@ export function AdminDashboard() {
       onConfirm={() => settleAdminConfirm(true)}
     />
     </>
+  );
+}
+
+function KnowledgeViewButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button type="button" onClick={onClick} aria-pressed={active} className={`min-h-11 rounded-md px-2 py-2 text-sm font-semibold transition ${active ? "bg-brand text-white" : "text-slate-600 hover:bg-slate-100"}`}>
+      {children}
+    </button>
   );
 }
 

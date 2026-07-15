@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  ChevronDown,
   CheckCircle2,
   ClipboardList,
   Download,
@@ -45,6 +46,7 @@ export function PilotReadinessAdmin() {
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<"checks" | "guidance">("checks");
 
   useEffect(() => {
     void loadReadiness();
@@ -138,18 +140,15 @@ export function PilotReadinessAdmin() {
   }
 
   return (
-    <div className="space-y-5">
-      <section className="ui-card p-5 shadow-soft">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-start gap-3">
-            <span className="grid size-11 shrink-0 place-items-center rounded-lg bg-cyan/10 text-brand">
-              <ClipboardList size={22} />
+    <div className="space-y-3 pb-6">
+      <header className="flex flex-col gap-3 border-b border-line pb-3 lg:flex-row lg:items-center lg:justify-between" data-testid="pilot-header">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-cyan/10 text-brand">
+              <ClipboardList size={18} />
             </span>
-            <div>
+            <div className="min-w-0">
               <h1 className="text-xl font-semibold text-ink">试运行验收</h1>
-              <p className="mt-1 text-sm text-slate-500">
-                汇总资料、权限、问答测试、培训讲解和反馈闭环，判断是否适合给员工小范围试用。
-              </p>
+              <p className="truncate text-sm text-slate-500">资料、权限、问答、培训与运营闭环验收</p>
             </div>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -171,8 +170,7 @@ export function PilotReadinessAdmin() {
               刷新
             </button>
           </div>
-        </div>
-      </section>
+      </header>
 
       {loading && !readiness && <PilotReadinessSkeleton />}
 
@@ -187,27 +185,37 @@ export function PilotReadinessAdmin() {
 
       {readiness && (
         <>
-          <section className="grid gap-3 md:grid-cols-5">
+          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="pilot-primary-metrics">
             <Metric label="验收得分" value={`${readiness.summary.score}%`} highlight />
             <Metric label="已就绪" value={readiness.summary.ready} />
             <Metric label="待完善" value={readiness.summary.warning} />
             <Metric label="需处理" value={readiness.summary.error} />
-            <Metric label="检查项" value={readiness.summary.total} />
           </section>
 
-          <section className="grid gap-3 md:grid-cols-4 xl:grid-cols-8">
-            <Metric label="可用资料" value={readiness.metrics.readyDocuments} />
-            <Metric label="知识片段" value={readiness.metrics.chunks} />
-            <Metric label="员工账号" value={readiness.metrics.employeeUsers} />
-            <Metric label="部门数" value={readiness.metrics.departments} />
-            <Metric label="测试问题" value={readiness.metrics.qaTests} />
-            <Metric label="已运行" value={readiness.metrics.qaRun} />
-            <Metric label="通过率" value={`${readiness.metrics.qaPassRate}%`} />
-            <Metric label="无引用率" value={`${readiness.metrics.qaNoCitationRate}%`} />
+          <details className="ui-card group overflow-hidden" data-testid="pilot-metrics-details">
+            <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
+              <span>查看全部验收指标 · {readiness.summary.total} 项检查</span>
+              <ChevronDown className="size-4 text-slate-400 transition group-open:rotate-180" />
+            </summary>
+            <div className="grid gap-3 border-t border-line p-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+              <Metric label="可用资料" value={readiness.metrics.readyDocuments} compact />
+              <Metric label="知识片段" value={readiness.metrics.chunks} compact />
+              <Metric label="员工账号" value={readiness.metrics.employeeUsers} compact />
+              <Metric label="部门数" value={readiness.metrics.departments} compact />
+              <Metric label="测试问题" value={readiness.metrics.qaTests} compact />
+              <Metric label="已运行" value={readiness.metrics.qaRun} compact />
+              <Metric label="通过率" value={`${readiness.metrics.qaPassRate}%`} compact />
+              <Metric label="无引用率" value={`${readiness.metrics.qaNoCitationRate}%`} compact />
+            </div>
+          </details>
+
+          <section className="ui-card grid grid-cols-2 gap-1 p-1.5" aria-label="试运行验收视图">
+            <PilotViewButton active={activeView === "checks"} onClick={() => setActiveView("checks")}>验收检查</PilotViewButton>
+            <PilotViewButton active={activeView === "guidance"} onClick={() => setActiveView("guidance")}>解析与试运行建议</PilotViewButton>
           </section>
 
-          <section className="grid gap-5 xl:grid-cols-[340px_1fr]">
-            <div className="space-y-5">
+          {activeView === "guidance" && (
+          <section className="grid gap-3 xl:grid-cols-2">
               <section className="ui-card p-5">
                 <div className="flex items-center gap-2">
                   <FileSearch size={18} className="text-brand" />
@@ -255,26 +263,37 @@ export function PilotReadinessAdmin() {
                   生成后可到“问答测试”页批量运行，并按真实资料修改期望答案。
                 </p>
               </section>
-            </div>
 
-            <section className="space-y-5">
+          </section>
+          )}
+
+          {activeView === "checks" && (
+            <section className="grid gap-3 xl:grid-cols-2">
               {(Object.keys(groupedChecks) as Array<PilotCheck["group"]>).map((group) => (
                 <CheckGroup key={group} title={groupLabel[group]} checks={groupedChecks[group]} />
               ))}
             </section>
-          </section>
+          )}
         </>
       )}
     </div>
   );
 }
 
-function Metric({ label, value, highlight = false }: { label: string; value: string | number; highlight?: boolean }) {
+function Metric({ label, value, highlight = false, compact = false }: { label: string; value: string | number; highlight?: boolean; compact?: boolean }) {
   return (
-    <div className={`rounded-lg border p-4 ${highlight ? "border-cyan/30 bg-cyan/10" : "border-line bg-white"}`}>
+    <div className={`rounded-lg border ${compact ? "px-3 py-2.5" : "p-4"} ${highlight ? "border-cyan/30 bg-cyan/10" : "border-line bg-white"}`}>
       <p className="text-xs font-medium text-slate-500">{label}</p>
-      <p className={`mt-2 text-2xl font-semibold ${highlight ? "text-brand" : "text-ink"}`}>{value}</p>
+      <p className={`${compact ? "mt-1 text-lg" : "mt-2 text-2xl"} font-semibold tabular-nums ${highlight ? "text-brand" : "text-ink"}`}>{value}</p>
     </div>
+  );
+}
+
+function PilotViewButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button type="button" onClick={onClick} aria-pressed={active} className={`min-h-11 rounded-md px-3 py-2 text-sm font-semibold transition ${active ? "bg-brand text-white" : "text-slate-600 hover:bg-slate-100"}`}>
+      {children}
+    </button>
   );
 }
 

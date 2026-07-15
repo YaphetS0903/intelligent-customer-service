@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, BarChart3, CalendarClock, CheckCircle2, ClipboardCheck, FilePlus2, GitCompareArrows, ListTodo, Loader2, Pause, Play, RefreshCw, Save, Upload, XCircle } from "lucide-react";
+import { AlertTriangle, BarChart3, CalendarClock, CheckCircle2, ChevronDown, ClipboardCheck, FilePlus2, GitCompareArrows, ListTodo, Loader2, Pause, Play, RefreshCw, Save, Upload, XCircle } from "lucide-react";
 import { ErrorRetry, PanelSkeleton, useToast } from "@/components/ui-feedback";
 import type { QaRemediationRetestTrend, QaRemediationTaskSummary } from "@/lib/knowledge-task-summary";
 import type { Citation, CitationDominantMatchSignal, CitationMatchSignalKey, KnowledgeBase, QaTestCase, QaTestStatus } from "@/lib/types";
@@ -21,6 +21,7 @@ const remediationStatusLabel: Record<QaRemediationTaskSummary["status"], string>
 
 type QaFilter = "all" | QaTestStatus | "no_citation" | "low_coverage" | "knowledge_miss";
 type BatchRunMode = "unanswered" | "failed" | "no_citation" | "low_coverage" | "knowledge_miss" | "risky";
+type QaAdminView = "tests" | "quality" | "automation" | "create";
 
 const batchRunLabel: Record<BatchRunMode, string> = {
   unanswered: "未运行",
@@ -481,6 +482,8 @@ export function QaTestAdmin() {
   const [expectedAnswer, setExpectedAnswer] = useState("");
   const [bulkContent, setBulkContent] = useState("");
   const [filter, setFilter] = useState<QaFilter>("all");
+  const [activeView, setActiveView] = useState<QaAdminView>("tests");
+  const [showAllTests, setShowAllTests] = useState(false);
   const [selectedKbIds, setSelectedKbIds] = useState<string[]>([]);
   const [runningId, setRunningId] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -603,7 +606,7 @@ export function QaTestAdmin() {
     [remediationByTestId]
   );
 
-  const visibleTests = useMemo(() => {
+  const filteredTests = useMemo(() => {
     if (filter === "all") {
       return tests;
     }
@@ -624,6 +627,13 @@ export function QaTestAdmin() {
 
     return tests.filter((item) => item.status === filter);
   }, [filter, tests]);
+  const visibleTests = showAllTests ? filteredTests : filteredTests.slice(0, 8);
+
+  function showTestsByFilter(nextFilter: QaFilter) {
+    setFilter(nextFilter);
+    setShowAllTests(false);
+    setActiveView("tests");
+  }
 
   async function loadTests(options: { notifyOnError?: boolean; strategyWindowDays?: QaStrategyTrendWindowDays } = {}, attempt = 0) {
     setLoading(true);
@@ -1615,29 +1625,27 @@ export function QaTestAdmin() {
   const showInitialError = !loading && Boolean(loadError) && tests.length === 0 && knowledgeBases.length === 0;
 
   return (
-    <div className="space-y-5">
-      <section className="ui-card p-5 shadow-soft">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-start gap-3">
-            <span className="grid size-11 shrink-0 place-items-center rounded-lg bg-cyan/10 text-brand">
-              <ClipboardCheck size={22} />
+    <div className="space-y-3 pb-6">
+      <header className="flex flex-col gap-3 border-b border-line pb-3 md:flex-row md:items-center md:justify-between" data-testid="qa-header">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-cyan/10 text-brand">
+              <ClipboardCheck size={18} />
             </span>
-            <div>
+            <div className="min-w-0">
               <h1 className="text-xl font-semibold text-ink">问答测试</h1>
-              <p className="mt-1 text-sm text-slate-500">用真实问题验证知识库回答、来源引用和模型稳定性。</p>
+              <p className="truncate text-sm text-slate-500">测试用例、质量评估、检索诊断与整改复测</p>
             </div>
           </div>
           <button
             type="button"
             onClick={() => void loadTests()}
             disabled={loading}
-            className="ui-button-secondary min-h-11"
+            className="ui-button-secondary h-9 self-start px-3 md:self-auto"
           >
             {loading ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
             刷新
           </button>
-        </div>
-      </section>
+      </header>
 
       {showInitialSkeleton && <QaTestAdminSkeleton />}
 
@@ -1652,22 +1660,40 @@ export function QaTestAdmin() {
 
       {!showInitialSkeleton && !showInitialError && (
         <>
-      <section className="grid gap-3 md:grid-cols-4">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="qa-primary-metrics">
         <Metric label="测试总数" value={stats.total} />
         <Metric label="已运行" value={stats.withAnswer} />
-        <Metric label="未运行" value={stats.unanswered} />
         <Metric label="通过率" value={`${stats.passRate}%`} />
         <Metric label="无引用率" value={`${stats.noCitationRate}%`} />
-        <Metric label="期望覆盖" value={`${stats.averageCoverage}%`} />
-        <Metric label="质量均分" value={`${stats.averageQuality}`} />
-        <Metric label="低覆盖" value={stats.lowCoverage} />
-        <Metric label="未命中" value={stats.knowledgeMiss} />
-        <Metric label="平均耗时" value={`${stats.averageLatency}ms`} />
-        <Metric label="QA Token" value={formatTokenCount(qaUsageSummary?.total_tokens ?? 0)} />
-        <Metric label="QA 成本" value={formatUsd(qaUsageSummary?.cost_usd)} />
-        <Metric label="估算用量" value={qaUsageSummary ? `${qaUsageSummary.estimated_count}/${qaUsageSummary.event_count}` : "0/0"} />
       </section>
 
+      <details className="ui-card group overflow-hidden" data-testid="qa-metrics-details">
+        <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
+          <span>查看全部质量与用量指标</span>
+          <ChevronDown className="size-4 text-slate-400 transition group-open:rotate-180" />
+        </summary>
+        <div className="grid gap-3 border-t border-line p-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          <Metric label="未运行" value={stats.unanswered} compact />
+          <Metric label="期望覆盖" value={`${stats.averageCoverage}%`} compact />
+          <Metric label="质量均分" value={`${stats.averageQuality}`} compact />
+          <Metric label="低覆盖" value={stats.lowCoverage} compact />
+          <Metric label="未命中" value={stats.knowledgeMiss} compact />
+          <Metric label="平均耗时" value={`${stats.averageLatency}ms`} compact />
+          <Metric label="QA Token" value={formatTokenCount(qaUsageSummary?.total_tokens ?? 0)} compact />
+          <Metric label="QA 成本" value={formatUsd(qaUsageSummary?.cost_usd)} compact />
+          <Metric label="估算用量" value={qaUsageSummary ? `${qaUsageSummary.estimated_count}/${qaUsageSummary.event_count}` : "0/0"} compact />
+        </div>
+      </details>
+
+      <section className="ui-card grid grid-cols-2 gap-1 p-1.5 lg:grid-cols-4" aria-label="问答测试视图">
+        <QaViewButton active={activeView === "tests"} onClick={() => setActiveView("tests")}>测试用例 · {tests.length}</QaViewButton>
+        <QaViewButton active={activeView === "quality"} onClick={() => setActiveView("quality")}>质量与检索诊断</QaViewButton>
+        <QaViewButton active={activeView === "automation"} onClick={() => setActiveView("automation")}>自动整改与复测</QaViewButton>
+        <QaViewButton active={activeView === "create"} onClick={() => setActiveView("create")}>新增与导入</QaViewButton>
+      </section>
+
+      {activeView === "quality" && (
+      <>
       <StrategyTrendPanel
         trend={strategyTrend}
         selectedWindowDays={strategyTrendWindowDays}
@@ -1677,6 +1703,39 @@ export function QaTestAdmin() {
         onGenerateAnomalyRemediation={(testIds, anomalyKey) => void generateStrategyTrendRemediationTasks(testIds, anomalyKey)}
       />
 
+      <RetrievalEvaluationPanel overview={retrievalOverview} onFilterChange={showTestsByFilter} />
+      <RetrievalStrategyComparisonPanel
+        report={retrievalStrategyReport}
+        loading={strategyComparing}
+        onRun={() => void compareRetrievalStrategies()}
+      />
+      <GovernanceImpactPanel
+        report={governanceImpactReport}
+        loading={governanceImpactLoading}
+        onRun={() => void compareGovernanceImpact()}
+      />
+      <GovernanceRecommendationPanel
+        report={governanceRecommendationReport}
+        loading={governanceRecommendationLoading}
+        remediating={governanceRecommendationRemediating}
+        onRun={() => void generateGovernanceRecommendations()}
+        onCreateRemediation={() => void generateRecommendationRemediationTasks()}
+        onFilterChange={showTestsByFilter}
+      />
+      <FailureTracePanel overview={failureTraceOverview} onFilterChange={showTestsByFilter} />
+
+      {(stats.slowest.length > 0 || stats.failedTests.length > 0 || stats.riskyTests.length > 0) && (
+        <section className="grid gap-3 xl:grid-cols-3">
+          <ReportList title="最慢问题" items={stats.slowest.map((item) => ({ id: item.id, title: item.question, detail: `${item.latency_ms ?? 0}ms · ${statusLabel[item.status]}` }))} emptyText="暂无耗时记录。" />
+          <ReportList title="不通过问题" items={stats.failedTests.map((item) => ({ id: item.id, title: item.question, detail: item.reviewer_note || "未填写评审备注" }))} emptyText="暂无不通过问题。" />
+          <ReportList title="需重点复核" items={stats.riskyTests.map((item) => ({ id: item.id, title: item.question, detail: qaDiagnostics(item).messages.join("；") }))} emptyText="暂无明显风险。" />
+        </section>
+      )}
+      </>
+      )}
+
+      {activeView === "automation" && (
+      <>
       <StrategyAnomalySchedulePanel
         schedule={strategyAnomalySchedule}
         loading={strategyAnomalyScheduleLoading}
@@ -1707,63 +1766,11 @@ export function QaTestAdmin() {
           onStop={stopRemediationRetestBatch}
         />
       )}
-
-      <RetrievalEvaluationPanel overview={retrievalOverview} onFilterChange={setFilter} />
-      <RetrievalStrategyComparisonPanel
-        report={retrievalStrategyReport}
-        loading={strategyComparing}
-        onRun={() => void compareRetrievalStrategies()}
-      />
-      <GovernanceImpactPanel
-        report={governanceImpactReport}
-        loading={governanceImpactLoading}
-        onRun={() => void compareGovernanceImpact()}
-      />
-      <GovernanceRecommendationPanel
-        report={governanceRecommendationReport}
-        loading={governanceRecommendationLoading}
-        remediating={governanceRecommendationRemediating}
-        onRun={() => void generateGovernanceRecommendations()}
-        onCreateRemediation={() => void generateRecommendationRemediationTasks()}
-        onFilterChange={setFilter}
-      />
-      <FailureTracePanel overview={failureTraceOverview} onFilterChange={setFilter} />
-
-      {(stats.slowest.length > 0 || stats.failedTests.length > 0 || stats.riskyTests.length > 0) && (
-        <section className="grid gap-5 xl:grid-cols-3">
-          <ReportList
-            title="最慢问题"
-            items={stats.slowest.map((item) => ({
-              id: item.id,
-              title: item.question,
-              detail: `${item.latency_ms ?? 0}ms · ${statusLabel[item.status]}`
-            }))}
-            emptyText="暂无耗时记录。"
-          />
-          <ReportList
-            title="不通过问题"
-            items={stats.failedTests.map((item) => ({
-              id: item.id,
-              title: item.question,
-              detail: item.reviewer_note || "未填写评审备注"
-            }))}
-            emptyText="暂无不通过问题。"
-          />
-          <ReportList
-            title="需重点复核"
-            items={stats.riskyTests.map((item) => {
-              const diagnostics = qaDiagnostics(item);
-              return {
-                id: item.id,
-                title: item.question,
-                detail: diagnostics.messages.join("；")
-              };
-            })}
-            emptyText="暂无明显风险。"
-          />
-        </section>
+      </>
       )}
 
+      {activeView === "create" && (
+      <>
       <section className="ui-card p-5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -1845,7 +1852,11 @@ export function QaTestAdmin() {
           className="mt-4 min-h-32 w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-brand"
         />
       </section>
+      </>
+      )}
 
+      {activeView === "tests" && (
+      <>
       <section className="ui-card p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap gap-2">
@@ -1973,7 +1984,22 @@ export function QaTestAdmin() {
             暂无匹配的测试问题。
           </div>
         )}
+        {filteredTests.length > 8 && (
+          <div className="flex justify-center pt-1">
+            <button
+              type="button"
+              onClick={() => setShowAllTests((current) => !current)}
+              className="ui-button-secondary min-h-10 px-4"
+              aria-expanded={showAllTests}
+            >
+              <ChevronDown className={`size-4 transition ${showAllTests ? "rotate-180" : ""}`} />
+              {showAllTests ? "收起用例" : `展开全部 ${filteredTests.length} 条用例`}
+            </button>
+          </div>
+        )}
       </section>
+      </>
+      )}
         </>
       )}
     </div>
@@ -2005,12 +2031,25 @@ function QaTestAdminSkeleton() {
   );
 }
 
-function Metric({ label, value }: { label: string; value: string | number }) {
+function Metric({ label, value, compact = false }: { label: string; value: string | number; compact?: boolean }) {
   return (
-    <div className="ui-card p-4">
+    <div className={compact ? "rounded-lg border border-line bg-white px-3 py-2.5" : "ui-card p-4"}>
       <p className="text-xs font-medium text-slate-500">{label}</p>
-      <p className="mt-2 text-2xl font-semibold text-ink">{value}</p>
+      <p className={`${compact ? "mt-1 text-lg" : "mt-2 text-2xl"} font-semibold tabular-nums text-ink`}>{value}</p>
     </div>
+  );
+}
+
+function QaViewButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`min-h-11 rounded-md px-3 py-2 text-sm font-semibold transition ${active ? "bg-brand text-white" : "text-slate-600 hover:bg-slate-100"}`}
+    >
+      {children}
+    </button>
   );
 }
 

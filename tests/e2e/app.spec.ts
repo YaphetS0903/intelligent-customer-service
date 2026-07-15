@@ -478,8 +478,13 @@ test.describe("天瑞内饰智能客服回归", () => {
     await gotoWithRetry(page, "/admin/documents");
 
     await expect(page.getByRole("heading", { name: "知识管理" })).toBeVisible();
-    await expectTextWithReload(page, "/admin/documents", "资料入库流程");
+    await expect(page.getByRole("button", { name: /资料管理/ })).toBeVisible();
+    const knowledgeHeaderBox = await page.getByTestId("knowledge-header").boundingBox();
+    expect(knowledgeHeaderBox?.height ?? 999).toBeLessThanOrEqual(90);
+    await page.getByRole("button", { name: "知识库与权限" }).click();
+    await expect(page.getByText("资料入库流程")).toBeVisible();
     await expect(page.getByText("权限配置")).toBeVisible();
+    await page.getByRole("button", { name: /资料管理/ }).click();
     await expect(page.getByText(/新资料默认草稿/)).toBeVisible();
     await expect(page.getByText("资料版本记录")).toBeVisible();
     await expect(page.getByText("回滚").first()).toBeVisible();
@@ -491,6 +496,7 @@ test.describe("天瑞内饰智能客服回归", () => {
       expect(noteBox?.width ?? 0).toBeGreaterThanOrEqual(220);
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
+    await page.getByRole("button", { name: "质量与治理" }).click();
     const templateButton = page.getByRole("button", { name: /文档权限模板/ });
     await expect(templateButton).toBeVisible();
     await templateButton.click();
@@ -812,11 +818,20 @@ test.describe("天瑞内饰智能客服回归", () => {
     }));
     await gotoWithRetry(page, "/admin/qa-tests");
     await expect(page.getByRole("heading", { name: "问答测试" })).toBeVisible({ timeout: 30_000 });
-    await expectTextWithReload(page, "/admin/qa-tests", "质量均分");
+    const qaHeaderBox = await page.getByTestId("qa-header").boundingBox();
+    expect(qaHeaderBox?.height ?? 999).toBeLessThanOrEqual(90);
+    await page.getByTestId("qa-metrics-details").locator("summary").click();
+    await expect(page.getByText("质量均分")).toBeVisible();
     if (data.tests.some((item: { answer?: string | null }) => Boolean(item.answer))) {
+      const expandAll = page.getByRole("button", { name: /展开全部 \d+ 条用例/ });
+      if (await expandAll.count()) {
+        await expandAll.click();
+      }
       await expect(page.getByText("质量评分", { exact: true }).first()).toBeVisible({ timeout: 60_000 });
     }
+    await page.getByRole("button", { name: "自动整改与复测" }).click();
     await expect(page.getByText("策略异常巡检").first()).toBeVisible({ timeout: 60_000 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
 
     const scheduleResponse = await getWithRetry(page, "/api/admin/knowledge-tasks/retest-schedule");
     const schedule = await scheduleResponse.json();
@@ -839,6 +854,21 @@ test.describe("天瑞内饰智能客服回归", () => {
         run_count: expect.any(Number)
       })
     );
+  });
+
+  test("试运行验收页按检查与建议分区展示", async ({ page }) => {
+    await tryLogin(page);
+    await gotoWithRetry(page, "/admin/pilot");
+
+    await expect(page.getByRole("heading", { name: "试运行验收" })).toBeVisible({ timeout: 30_000 });
+    const pilotHeaderBox = await page.getByTestId("pilot-header").boundingBox();
+    expect(pilotHeaderBox?.height ?? 999).toBeLessThanOrEqual(100);
+    await expect(page.getByRole("button", { name: "验收检查" })).toBeVisible();
+    await page.getByRole("button", { name: "解析与试运行建议" }).click();
+    await expect(page.getByRole("heading", { name: "解析覆盖" })).toBeVisible();
+    await page.getByTestId("pilot-metrics-details").locator("summary").click();
+    await expect(page.getByText("可用资料")).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
   });
 
   test("生产部署检查覆盖完整方案闭环", async ({ page }) => {
@@ -1459,7 +1489,7 @@ test.describe("天瑞内饰智能客服回归", () => {
     await tryLogin(page);
     await gotoWithRetry(page, "/admin/training");
 
-    await expect(page.getByRole("heading", { name: "PPT 语音讲解" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "课程管理" })).toBeVisible();
     await expectHeadingWithReload(page, "/admin/training", "培训任务");
     await expect(page.getByText("管理课程发布、视频生成和归档删除。")).toBeVisible();
 
@@ -1475,13 +1505,18 @@ test.describe("天瑞内饰智能客服回归", () => {
     await tryLogin(page);
     await gotoWithRetry(page, "/admin/training");
 
+    const trainingHeaderBox = await page.getByTestId("training-header").boundingBox();
+    expect(trainingHeaderBox?.height ?? 999).toBeLessThanOrEqual(90);
+    await page.getByRole("button", { name: "考试与课程设置" }).click();
     await expect(page.getByRole("heading", { name: "课程资料与可见范围" })).toBeVisible();
     await expect(page.getByPlaceholder("课程简介").last()).toBeVisible();
-    await expect(page.getByRole("combobox", { name: "筛选部门" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "导出" })).toBeEnabled();
     await expect(page.getByRole("heading", { name: "正式考试与完课证书" })).toBeVisible();
     await expect(page.getByRole("button", { name: "根据讲稿生成初稿" })).toBeVisible();
+    await page.getByRole("button", { name: "学习跟踪" }).click();
+    await expect(page.getByRole("combobox", { name: "筛选部门" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "导出" })).toBeEnabled();
     await expect(page.getByRole("button", { name: "提醒未完课员工" })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
   });
 
   test("员工培训播放器提供倍速、续播和可信完课提示", async ({ page }) => {

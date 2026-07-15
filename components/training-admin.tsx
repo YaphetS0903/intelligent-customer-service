@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Archive, CheckCircle2, CircleAlert, Clock, Download, Eye, EyeOff, FileAudio, Film, Loader2, Play, Save, Trash2, Trophy, Upload, UserCheck, UserX, Video } from "lucide-react";
+import { Archive, CheckCircle2, ChevronDown, CircleAlert, Clock, Download, Eye, EyeOff, FileAudio, Film, Loader2, Play, Save, Trash2, Trophy, Upload, UserCheck, UserX, Video } from "lucide-react";
 import { StatusPill } from "@/components/status-pill";
 import { TrainingQuizAdmin } from "@/components/training-quiz-admin";
 import { ActionConfirmDialog, ErrorRetry, PanelSkeleton, useToast, type ActionConfirmRequest } from "@/components/ui-feedback";
@@ -45,6 +45,7 @@ export function TrainingAdmin() {
   const [publishingId, setPublishingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<TrainingConfirmDialogState | null>(null);
+  const [activeView, setActiveView] = useState<"courses" | "learning" | "settings" | "create">("courses");
   const { pushToast } = useToast();
 
   function requestTrainingConfirm(input: ActionConfirmRequest) {
@@ -572,16 +573,14 @@ export function TrainingAdmin() {
 
   return (
     <>
-    <div className="space-y-5">
-      <section className="ui-card p-5 shadow-soft">
-        <div className="flex items-center gap-2">
-          <FileAudio size={20} className="text-brand" />
-          <div>
-            <h1 className="text-xl font-semibold text-ink">PPT 语音讲解</h1>
-            <p className="mt-1 text-sm text-slate-500">上传 PPTX，自动提取页面内容并生成逐页培训讲稿。</p>
+    <div className="space-y-3 pb-6">
+      <header className="flex items-center gap-2.5 border-b border-line pb-3" data-testid="training-header">
+          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-cyan/10 text-brand"><FileAudio size={18} /></span>
+          <div className="min-w-0">
+            <h1 className="text-xl font-semibold text-ink">课程管理</h1>
+            <p className="truncate text-sm text-slate-500">PPT 讲稿、语音视频、考试发布与学习进度</p>
           </div>
-        </div>
-      </section>
+      </header>
 
       {initialLoading && jobs.length === 0 && <TrainingAdminSkeleton />}
 
@@ -598,6 +597,14 @@ export function TrainingAdmin() {
         <>
           <TrainingReadiness stats={stats} loading={loading} />
 
+          <section className="ui-card grid grid-cols-2 gap-1 p-1.5 lg:grid-cols-4" aria-label="课程管理视图">
+            <TrainingViewButton active={activeView === "courses"} onClick={() => setActiveView("courses")}>课程列表 · {jobs.length}</TrainingViewButton>
+            <TrainingViewButton active={activeView === "learning"} onClick={() => setActiveView("learning")}>学习跟踪</TrainingViewButton>
+            <TrainingViewButton active={activeView === "settings"} onClick={() => setActiveView("settings")}>考试与课程设置</TrainingViewButton>
+            <TrainingViewButton active={activeView === "create"} onClick={() => setActiveView("create")}>新建课程</TrainingViewButton>
+          </section>
+
+          {activeView === "create" && (
           <section className="ui-card p-5">
             <h2 className="text-base font-semibold text-ink">创建培训讲解</h2>
             <p className="mt-1 text-sm text-slate-500">
@@ -640,7 +647,14 @@ export function TrainingAdmin() {
               上传后会生成逐页课件画面、课件预览和讲解稿；员工端可按页播放语音，也可一键连续讲解。服务器缺少渲染工具时会自动降级为讲稿版课件。
             </div>
           </section>
+          )}
 
+          {activeView === "settings" && selectedJob && (
+            <CourseSelectionBar jobs={jobs} selectedJobId={selectedJob.id} onChange={setSelectedJobId} />
+          )}
+
+          {activeView === "settings" && (
+          <>
           {selectedJob && (
             <section className="ui-card p-5">
               <h2 className="text-base font-semibold text-ink">课程资料与可见范围</h2>
@@ -663,6 +677,13 @@ export function TrainingAdmin() {
 
           {selectedJob && <TrainingQuizAdmin job={selectedJob} onUpdated={loadJobs} />}
 
+          {selectedJob && (
+            <TrainingAuditTimeline events={auditEvents.filter((event) => event.training_job_id === selectedJob.id)} users={users} />
+          )}
+          </>
+          )}
+
+          {activeView === "learning" && (
           <TrainingLearnerReport
             jobs={jobs}
             selectedJob={selectedJob}
@@ -681,11 +702,9 @@ export function TrainingAdmin() {
             onExport={exportLearningReport}
             onRevokeCertificate={revokeCertificate}
           />
-
-          {selectedJob && (
-            <TrainingAuditTimeline events={auditEvents.filter((event) => event.training_job_id === selectedJob.id)} users={users} />
           )}
 
+          {activeView === "courses" && (
           <section className="space-y-3">
         <div className="flex flex-col gap-1 px-1 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -819,6 +838,7 @@ export function TrainingAdmin() {
           )}
         </div>
           </section>
+          )}
         </>
       )}
     </div>
@@ -828,6 +848,25 @@ export function TrainingAdmin() {
       onConfirm={() => settleTrainingConfirm(true)}
     />
     </>
+  );
+}
+
+function TrainingViewButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button type="button" onClick={onClick} aria-pressed={active} className={`min-h-11 rounded-md px-3 py-2 text-sm font-semibold transition ${active ? "bg-brand text-white" : "text-slate-600 hover:bg-slate-100"}`}>
+      {children}
+    </button>
+  );
+}
+
+function CourseSelectionBar({ jobs, selectedJobId, onChange }: { jobs: TrainingJob[]; selectedJobId: string; onChange: (id: string) => void }) {
+  return (
+    <section className="ui-card flex flex-col gap-2 p-3 sm:flex-row sm:items-center">
+      <label htmlFor="training-course-settings" className="shrink-0 text-sm font-semibold text-slate-700">当前课程</label>
+      <select id="training-course-settings" value={selectedJobId} onChange={(event) => onChange(event.target.value)} className="h-10 min-w-0 flex-1 rounded-lg border border-line bg-white px-3 text-sm outline-none focus:border-brand">
+        {jobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}
+      </select>
+    </section>
   );
 }
 
@@ -1170,49 +1209,40 @@ function TrainingReadiness({
   ];
 
   return (
-    <section className="ui-card p-5">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h2 className="text-base font-semibold text-ink">培训生成流程</h2>
-          <p className="mt-1 text-sm text-slate-500">先完成 PPT 讲稿与语音演示，再生成课件视频或数字人讲解。</p>
-        </div>
-        <div className="grid grid-cols-3 gap-2 text-center md:grid-cols-6">
-          <Metric label="课程" value={stats.total} />
-          <Metric label="可用" value={stats.ready} tone="good" />
-          <Metric label="已发布" value={stats.published} tone="good" />
-          <Metric label="讲稿页" value={stats.pages} />
-          <Metric label="课件页" value={stats.slideImages} />
-          <Metric label="语音页" value={stats.audio} tone="warn" />
-          <Metric label="学习完成" value={stats.completedLearners} tone="good" />
-          <Metric label="视频" value={stats.videos} tone="good" />
-        </div>
+    <section className="space-y-2" data-testid="training-readiness">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Metric label="课程" value={stats.total} />
+        <Metric label="可用" value={stats.ready} tone="good" />
+        <Metric label="已发布" value={stats.published} tone="good" />
+        <Metric label="完成学习" value={stats.completedLearners} tone="good" />
       </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-6">
-        {steps.map((step) => (
-          <div
-            key={step.label}
-            className={`rounded-lg border p-3 ${
-              step.ready ? "border-emerald-200 bg-emerald-50" : "border-line bg-slate-50"
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              {step.ready ? (
-                <CheckCircle2 size={16} className="text-emerald-700" />
-              ) : (
-                <Clock size={16} className="text-slate-500" />
-              )}
-              <p className={`text-sm font-semibold ${step.ready ? "text-emerald-800" : "text-slate-700"}`}>
-                {step.label}
-              </p>
-            </div>
-            <p className={`mt-2 text-xs leading-5 ${step.ready ? "text-emerald-700" : "text-slate-500"}`}>
-              {step.detail}
-            </p>
+      <details className="ui-card group overflow-hidden">
+        <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
+          <span>查看生成进度与媒体指标</span>
+          <ChevronDown className="size-4 text-slate-400 transition group-open:rotate-180" />
+        </summary>
+        <div className="border-t border-line p-3">
+          <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
+            <Metric label="讲稿页" value={stats.pages} />
+            <Metric label="课件页" value={stats.slideImages} />
+            <Metric label="语音页" value={stats.audio} tone="warn" />
+            <Metric label="视频" value={stats.videos} tone="good" />
           </div>
-        ))}
-      </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+            {steps.map((step) => (
+              <div key={step.label} className={`rounded-lg border px-3 py-2 ${step.ready ? "border-emerald-200 bg-emerald-50" : "border-line bg-slate-50"}`}>
+                <div className="flex items-center gap-2">
+                  {step.ready ? <CheckCircle2 size={15} className="text-emerald-700" /> : <Clock size={15} className="text-slate-500" />}
+                  <p className={`text-xs font-semibold ${step.ready ? "text-emerald-800" : "text-slate-700"}`}>{step.label}</p>
+                </div>
+                <p className={`mt-1 text-xs leading-5 ${step.ready ? "text-emerald-700" : "text-slate-500"}`}>{step.detail}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </details>
       {stats.failed > 0 && (
-        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           <span className="inline-flex items-center gap-2 font-medium">
             <CircleAlert size={15} />
             有 {stats.failed} 个课程生成失败
