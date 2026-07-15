@@ -8,6 +8,8 @@ import { fetchWithRetry } from "@/lib/client-fetch";
 import { ErrorRetry, PanelSkeleton, useToast } from "@/components/ui-feedback";
 
 type TabKey = "conversations" | "popular" | "feedback" | "tickets" | "security" | "usage" | "gaps" | "qa";
+const INITIAL_VISIBLE_ITEMS = 8;
+
 type SupplementInput = {
   knowledge_base_id: string;
   title: string;
@@ -72,6 +74,7 @@ export function InsightsAdmin() {
   const [securityCategoryFilter, setSecurityCategoryFilter] = useState<SecurityCategoryFilter>("all");
   const [securitySeverityFilter, setSecuritySeverityFilter] = useState<SecuritySeverityFilter>("all");
   const [securityStatusFilter, setSecurityStatusFilter] = useState<SecurityStatusFilter>("all");
+  const [visibleItems, setVisibleItems] = useState(INITIAL_VISIBLE_ITEMS);
 
   useEffect(() => {
     const tab = new URLSearchParams(window.location.search).get("tab");
@@ -80,6 +83,10 @@ export function InsightsAdmin() {
     }
     void loadInsights();
   }, []);
+
+  useEffect(() => {
+    setVisibleItems(INITIAL_VISIBLE_ITEMS);
+  }, [activeTab, securityCategoryFilter, securitySeverityFilter, securityStatusFilter]);
 
   const selectedConversation = useMemo(() => {
     return insights?.conversations.find((conversation) => conversation.id === selectedConversationId)
@@ -438,29 +445,29 @@ export function InsightsAdmin() {
   }
 
   return (
-    <div className="space-y-5">
-      <section className="ui-card p-5 shadow-soft">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-start gap-3">
-            <span className="grid size-11 shrink-0 place-items-center rounded-lg bg-cyan/10 text-brand">
-              <MessageSquare size={22} />
+    <div className="space-y-3 pb-6">
+      <header className="flex flex-col gap-3 border-b border-line pb-3 sm:flex-row sm:items-center sm:justify-between" data-testid="insights-header">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2.5">
+            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-cyan/10 text-brand">
+              <MessageSquare size={18} />
             </span>
-            <div>
+            <div className="min-w-0">
               <h1 className="text-xl font-semibold text-ink">会话与反馈</h1>
-              <p className="mt-1 text-sm text-slate-500">查看员工会话、引用来源、反馈和待补充知识线索。</p>
+              <p className="truncate text-sm text-slate-500">会话审计、反馈、工单与知识整改</p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => void loadInsights()}
-            disabled={loading}
-            className="ui-button-secondary h-10"
-          >
-            {loading ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
-            刷新
-          </button>
         </div>
-      </section>
+        <button
+          type="button"
+          onClick={() => void loadInsights()}
+          disabled={loading}
+          className="ui-button-secondary h-9 self-start px-3 sm:self-auto"
+        >
+          {loading ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
+          刷新
+        </button>
+      </header>
 
       {loadError && (
         <ErrorRetry
@@ -497,8 +504,24 @@ export function InsightsAdmin() {
         />
       )}
 
-      <section className="ui-card p-2">
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+      <section className="ui-card p-1.5">
+        <label className="sr-only" htmlFor="insights-tab">审计与工单视图</label>
+        <select
+          id="insights-tab"
+          value={activeTab}
+          onChange={(event) => setActiveTab(event.target.value as TabKey)}
+          className="h-10 w-full rounded-md border-0 bg-slate-50 px-3 text-sm font-semibold text-ink outline-none focus:ring-2 focus:ring-brand/30 sm:hidden"
+        >
+          <option value="conversations">会话审计</option>
+          <option value="popular">热门问题</option>
+          <option value="feedback">反馈记录</option>
+          <option value="tickets">人工工单</option>
+          <option value="security">安全审计</option>
+          <option value="usage">模型用量</option>
+          <option value="gaps">待补充知识</option>
+          <option value="qa">QA 整改</option>
+        </select>
+        <div className="hidden gap-1 sm:grid sm:grid-cols-4 xl:grid-cols-8">
           <TabButton active={activeTab === "conversations"} onClick={() => setActiveTab("conversations")}>
             会话审计
           </TabButton>
@@ -531,7 +554,7 @@ export function InsightsAdmin() {
 
       {insights && (
         <>
-          <section className="space-y-3" data-testid="metrics-overview">
+          <section className="space-y-2" data-testid="metrics-overview">
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <PrimaryMetric
                 testId="primary-metric-pending-work"
@@ -568,7 +591,7 @@ export function InsightsAdmin() {
             </div>
 
             <details className="ui-card group overflow-hidden" data-testid="metrics-details">
-              <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40 [&::-webkit-details-marker]:hidden">
+              <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40 [&::-webkit-details-marker]:hidden">
                 <span>查看全部指标</span>
                 <ChevronDown className="size-4 shrink-0 text-slate-500 transition-transform duration-200 group-open:rotate-180" aria-hidden="true" />
               </summary>
@@ -610,7 +633,7 @@ export function InsightsAdmin() {
           {activeTab === "conversations" && (
             <section className="grid min-w-0 gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
               <div className="min-w-0 space-y-2">
-                {insights.conversations.map((conversation) => (
+                {insights.conversations.slice(0, visibleItems).map((conversation) => (
                   <button
                     key={conversation.id}
                     type="button"
@@ -640,6 +663,11 @@ export function InsightsAdmin() {
                 {insights.conversations.length === 0 && (
                   <EmptyState text="暂无员工会话。" />
                 )}
+                <ListPager
+                  total={insights.conversations.length}
+                  visible={visibleItems}
+                  onChange={setVisibleItems}
+                />
               </div>
 
               <ConversationDetail conversation={selectedConversation} />
@@ -647,18 +675,21 @@ export function InsightsAdmin() {
           )}
 
           {activeTab === "popular" && (
-            <PopularQuestionsPanel
-              questions={insights.popularQuestions}
-              onOpenConversation={(conversationId) => {
-                setSelectedConversationId(conversationId);
-                setActiveTab("conversations");
-              }}
-            />
+            <section className="space-y-3">
+              <PopularQuestionsPanel
+                questions={insights.popularQuestions.slice(0, visibleItems)}
+                onOpenConversation={(conversationId) => {
+                  setSelectedConversationId(conversationId);
+                  setActiveTab("conversations");
+                }}
+              />
+              <ListPager total={insights.popularQuestions.length} visible={visibleItems} onChange={setVisibleItems} />
+            </section>
           )}
 
           {activeTab === "feedback" && (
             <section className="grid gap-3">
-              {insights.feedback.map((item) => (
+              {insights.feedback.slice(0, visibleItems).map((item) => (
                 <FeedbackCard
                   key={item.id}
                   item={item}
@@ -669,12 +700,13 @@ export function InsightsAdmin() {
                 />
               ))}
               {insights.feedback.length === 0 && <EmptyState text="暂无反馈记录。" />}
+              <ListPager total={insights.feedback.length} visible={visibleItems} onChange={setVisibleItems} />
             </section>
           )}
 
           {activeTab === "tickets" && (
             <section className="grid gap-3">
-              {insights.tickets.map((ticket) => (
+              {insights.tickets.slice(0, visibleItems).map((ticket) => (
                 <TicketCard
                   key={ticket.id}
                   ticket={ticket}
@@ -686,6 +718,7 @@ export function InsightsAdmin() {
                 />
               ))}
               {insights.tickets.length === 0 && <EmptyState text="暂无人工工单。" />}
+              <ListPager total={insights.tickets.length} visible={visibleItems} onChange={setVisibleItems} />
             </section>
           )}
 
@@ -709,7 +742,7 @@ export function InsightsAdmin() {
                 }}
               />
               <SecurityCoverageLegend />
-              {filteredSecurityEvents.map((event) => (
+              {filteredSecurityEvents.slice(0, visibleItems).map((event) => (
                 <SecurityEventCard
                   key={event.id}
                   event={event}
@@ -725,6 +758,7 @@ export function InsightsAdmin() {
               {insights.securityEvents.length > 0 && filteredSecurityEvents.length === 0 && (
                 <EmptyState text="没有符合筛选条件的安全审计事件。" />
               )}
+              <ListPager total={filteredSecurityEvents.length} visible={visibleItems} onChange={setVisibleItems} />
             </section>
           )}
 
@@ -734,7 +768,7 @@ export function InsightsAdmin() {
 
           {activeTab === "gaps" && (
             <section className="grid gap-3">
-              {insights.knowledgeGaps.map((gap) => (
+              {insights.knowledgeGaps.slice(0, visibleItems).map((gap) => (
                 <GapCard
                   key={gap.id}
                   gap={gap}
@@ -747,12 +781,13 @@ export function InsightsAdmin() {
                 />
               ))}
               {insights.knowledgeGaps.length === 0 && <EmptyState text="暂无待补充知识线索。" />}
+              <ListPager total={insights.knowledgeGaps.length} visible={visibleItems} onChange={setVisibleItems} />
             </section>
           )}
 
           {activeTab === "qa" && (
             <section className="grid gap-3">
-              {insights.qaRemediationTasks.map((task) => (
+              {insights.qaRemediationTasks.slice(0, visibleItems).map((task) => (
                 <QaRemediationCard
                   key={task.id}
                   task={task}
@@ -764,6 +799,7 @@ export function InsightsAdmin() {
                 />
               ))}
               {insights.qaRemediationTasks.length === 0 && <EmptyState text="暂无 QA 整改任务。" />}
+              <ListPager total={insights.qaRemediationTasks.length} visible={visibleItems} onChange={setVisibleItems} />
             </section>
           )}
         </>
@@ -1626,45 +1662,27 @@ function SecurityAlertPanel({
   const latest = alerts[0];
 
   return (
-    <section className="rounded-lg border border-red-200 bg-red-50 p-4">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-2 rounded-full bg-red-100 px-3 py-1 text-sm font-semibold text-red-800">
-              <AlertTriangle size={16} />
-              安全告警
-            </span>
-            {criticalCount > 0 && (
-              <span className="rounded-full bg-red-700 px-2.5 py-1 text-xs font-semibold text-white">
-                严重 {criticalCount}
-              </span>
-            )}
-            {highCount > 0 && (
-              <span className="rounded-full bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-800">
-                高风险 {highCount}
-              </span>
-            )}
+    <section className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5" role="alert">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+        <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-red-100 text-red-700">
+          <AlertTriangle size={17} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <h2 className="text-sm font-semibold text-red-950">安全告警 · {alerts.length} 条待处理</h2>
+            {criticalCount > 0 && <span className="text-xs font-semibold text-red-800">严重 {criticalCount}</span>}
+            {highCount > 0 && <span className="text-xs font-semibold text-red-700">高风险 {highCount}</span>}
           </div>
-          <h2 className="mt-3 text-base font-semibold text-red-950">
-            有 {alerts.length} 条高危或严重安全事件待处理
-          </h2>
           {latest && (
-            <p className="mt-2 text-sm leading-6 text-red-800">
-              最近告警：{securityCategoryLabel(latest.category)} · {latest.title} · {latest.user?.email ?? "未知用户"} · {new Date(latest.created_at).toLocaleString("zh-CN")}
+            <p className="mt-0.5 truncate text-xs text-red-800" title={`${securityCategoryLabel(latest.category)} · ${latest.title} · ${latest.user?.email ?? "未知用户"}`}>
+              最近：{securityCategoryLabel(latest.category)} · {latest.title} · {latest.user?.email ?? "未知用户"} · {new Date(latest.created_at).toLocaleString("zh-CN")}
             </p>
           )}
-          <div className="mt-3 flex flex-wrap gap-2">
-            {alerts.slice(0, 3).map((event) => (
-              <span key={event.id} className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-red-700">
-                {severityLabel(event.severity)} / {securityCategoryLabel(event.category)}
-              </span>
-            ))}
-          </div>
         </div>
         <button
           type="button"
           onClick={onOpenSecurity}
-          className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-red-700 px-4 text-sm font-semibold text-white hover:bg-red-800"
+          className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-lg bg-red-700 px-3 text-sm font-semibold text-white hover:bg-red-800"
         >
           处理安全告警
           <ExternalLink size={15} />
@@ -1692,53 +1710,27 @@ function OperationAlertPanel({
   }
 
   return (
-    <section className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-2 rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-800">
-              <AlertTriangle size={16} />
-              运营告警
-            </span>
-            {criticalCount > 0 && (
-              <span className="rounded-full bg-red-700 px-2.5 py-1 text-xs font-semibold text-white">
-                严重 {criticalCount}
-              </span>
-            )}
-            {warningCount > 0 && (
-              <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
-                待跟进 {warningCount}
-              </span>
-            )}
-            <span className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-600">
-              <Clock3 size={13} />
-              {new Date(latest.created_at).toLocaleString("zh-CN")}
-            </span>
+    <section className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+        <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-amber-100 text-amber-800">
+          <AlertTriangle size={17} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <h2 className="text-sm font-semibold text-amber-950">运营告警 · {latest.title}</h2>
+            {criticalCount > 0 && <span className="text-xs font-semibold text-red-700">严重 {criticalCount}</span>}
+            {warningCount > 0 && <span className="text-xs font-semibold text-amber-800">待跟进 {warningCount}</span>}
           </div>
-          <h2 className="mt-3 break-words text-base font-semibold text-amber-950">{latest.title}</h2>
-          <p className="mt-2 break-words text-sm leading-6 text-amber-800">{latest.detail}</p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {latest.metrics.map((metric) => (
-              <span key={`${latest.id}-${metric.label}`} className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-amber-800">
-                {metric.label}：{metric.value}
-              </span>
-            ))}
-          </div>
-          {alerts.length > 1 && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {alerts.slice(1).map((alert) => (
-                <span key={alert.id} className={`rounded-full px-2.5 py-1 text-xs font-medium ${operationSeverityClass(alert.severity)}`}>
-                  {operationSeverityLabel(alert.severity)} · {alert.title}
-                </span>
-              ))}
-            </div>
-          )}
+          <p className="mt-0.5 truncate text-xs text-amber-800" title={latest.detail}>
+            {latest.detail}
+            {latest.metrics.map((metric) => ` · ${metric.label} ${metric.value}`).join("")}
+          </p>
         </div>
-        <div className="flex shrink-0 flex-col gap-2 sm:flex-row lg:flex-col">
+        <div className="flex shrink-0 gap-2">
           <button
             type="button"
             onClick={latest.category === "qa_strategy_anomaly_error" ? onOpenQaTests : onOpenQa}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-amber-700 px-4 text-sm font-semibold text-white hover:bg-amber-800"
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-amber-700 px-3 text-sm font-semibold text-white hover:bg-amber-800"
           >
             {latest.category === "qa_strategy_anomaly_error" ? <ExternalLink size={15} /> : <ListTodo size={15} />}
             {latest.action_label}
@@ -1747,7 +1739,7 @@ function OperationAlertPanel({
             <button
               type="button"
               onClick={onOpenQaTests}
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-amber-300 bg-white px-4 text-sm font-semibold text-amber-800 hover:bg-amber-100"
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-amber-300 bg-white px-3 text-sm font-semibold text-amber-800 hover:bg-amber-100"
             >
               巡检计划
               <ExternalLink size={15} />
@@ -1757,26 +1749,6 @@ function OperationAlertPanel({
       </div>
     </section>
   );
-}
-
-function operationSeverityLabel(severity: OperationAlert["severity"]) {
-  const labels: Record<OperationAlert["severity"], string> = {
-    info: "提示",
-    warning: "待跟进",
-    critical: "严重"
-  };
-
-  return labels[severity];
-}
-
-function operationSeverityClass(severity: OperationAlert["severity"]) {
-  const classes: Record<OperationAlert["severity"], string> = {
-    info: "bg-cyan/10 text-brand",
-    warning: "bg-amber-100 text-amber-800",
-    critical: "bg-red-100 text-red-800"
-  };
-
-  return classes[severity];
 }
 
 function SecurityEventCard({
@@ -2150,17 +2122,15 @@ function PrimaryMetric({
     tone === "good" ? "bg-emerald-50 text-emerald-700" : tone === "bad" ? "bg-red-50 text-red-700" : tone === "warn" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-700";
 
   return (
-    <article className="ui-card min-w-0 p-4" data-testid={testId}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-slate-600">{label}</p>
-          <p className={`mt-2 text-3xl font-semibold tabular-nums ${toneClass}`}>{value}</p>
-        </div>
-        <span className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${iconClass}`}>
+    <article className="ui-card flex min-w-0 items-center gap-3 px-3 py-3" data-testid={testId}>
+      <span className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${iconClass}`}>
           <Icon className="size-4" aria-hidden="true" />
-        </span>
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium text-slate-600">{label}</p>
+        <p className="mt-0.5 truncate text-xs text-slate-500" title={helper}>{helper}</p>
       </div>
-      <p className="mt-3 break-words text-xs leading-5 text-slate-500">{helper}</p>
+      <p className={`shrink-0 text-2xl font-semibold tabular-nums ${toneClass}`}>{value}</p>
     </article>
   );
 }
@@ -2191,12 +2161,54 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
     <button
       type="button"
       onClick={onClick}
-      className={`h-10 rounded-lg text-sm font-semibold transition ${
+      className={`h-9 rounded-md px-2 text-sm font-semibold transition ${
         active ? "bg-brand text-white" : "text-slate-600 hover:bg-slate-100"
       }`}
     >
       {children}
     </button>
+  );
+}
+
+function ListPager({
+  total,
+  visible,
+  onChange
+}: {
+  total: number;
+  visible: number;
+  onChange: (value: number) => void;
+}) {
+  if (total <= INITIAL_VISIBLE_ITEMS) {
+    return null;
+  }
+
+  const hasMore = visible < total;
+  const nextCount = Math.min(total, visible + INITIAL_VISIBLE_ITEMS);
+
+  return (
+    <div className="flex items-center justify-center gap-2 border-t border-line pt-3">
+      {hasMore && (
+        <button
+          type="button"
+          onClick={() => onChange(nextCount)}
+          className="ui-button-secondary h-9 px-3 text-xs"
+        >
+          再显示 {nextCount - visible} 条
+          <ChevronDown size={14} />
+        </button>
+      )}
+      {visible > INITIAL_VISIBLE_ITEMS && (
+        <button
+          type="button"
+          onClick={() => onChange(INITIAL_VISIBLE_ITEMS)}
+          className="ui-button-secondary h-9 px-3 text-xs"
+        >
+          收起列表
+        </button>
+      )}
+      <span className="text-xs text-slate-500">共 {total} 条</span>
+    </div>
   );
 }
 

@@ -518,6 +518,10 @@ test.describe("天瑞内饰智能客服回归", () => {
     await expect(securityTab).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("metrics-overview")).toBeVisible();
     await expect(page.locator('[data-testid^="primary-metric-"]')).toHaveCount(4);
+    const insightsHeaderBox = await page.getByTestId("insights-header").boundingBox();
+    const primaryMetricBox = await page.getByTestId("primary-metric-pending-work").boundingBox();
+    expect(insightsHeaderBox?.height ?? 999).toBeLessThanOrEqual(80);
+    expect(primaryMetricBox?.height ?? 999).toBeLessThanOrEqual(90);
     const metricsDetails = page.getByTestId("metrics-details");
     await expect(metricsDetails.getByText("查看全部指标")).toBeVisible();
     await metricsDetails.locator("summary").click();
