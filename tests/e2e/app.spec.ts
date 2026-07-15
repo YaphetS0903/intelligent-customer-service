@@ -483,6 +483,14 @@ test.describe("天瑞内饰智能客服回归", () => {
     await expect(page.getByText(/新资料默认草稿/)).toBeVisible();
     await expect(page.getByText("资料版本记录")).toBeVisible();
     await expect(page.getByText("回滚").first()).toBeVisible();
+    const versionRow = page.getByTestId("document-version-row").first();
+    await expect(versionRow).toBeVisible();
+    const note = versionRow.getByTestId("document-version-note");
+    if (await note.count()) {
+      const noteBox = await note.boundingBox();
+      expect(noteBox?.width ?? 0).toBeGreaterThanOrEqual(220);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
     const templateButton = page.getByRole("button", { name: /文档权限模板/ });
     await expect(templateButton).toBeVisible();
     await templateButton.click();

@@ -2453,45 +2453,53 @@ export function AdminDashboard() {
             />
           )}
 
-          <div className="mt-5 rounded-lg border border-line">
+          <div className="mt-5 min-w-0 overflow-hidden rounded-lg border border-line">
             <div className="border-b border-line bg-slate-50 px-4 py-3">
               <h3 className="text-sm font-semibold text-ink">资料版本记录</h3>
               <p className="mt-1 text-xs text-slate-500">记录每次上传和回滚形成的版本，便于追踪资料何时变更、处理结果和上传说明。</p>
             </div>
             <div className="divide-y divide-line">
               {activeDocumentVersions.slice(0, 12).map((version) => (
-                <div key={version.id} className="grid gap-3 px-4 py-3 text-sm lg:grid-cols-[1fr_100px_110px_170px_170px] lg:items-center">
+                <div
+                  key={version.id}
+                  data-testid="document-version-row"
+                  className="grid min-w-0 gap-3 px-4 py-3 text-sm 2xl:grid-cols-[minmax(260px,1fr)_auto] 2xl:items-center"
+                >
                   <div className="min-w-0">
                     <p className="truncate font-medium text-ink">{version.title}</p>
                     <p className="mt-1 truncate text-xs text-slate-500">{version.file_name}</p>
                     {version.change_note && (
-                      <p className="mt-1 text-xs leading-5 text-slate-500">说明：{version.change_note}</p>
+                      <p data-testid="document-version-note" className="mt-1 break-words text-xs leading-5 text-slate-500">
+                        说明：{version.change_note}
+                      </p>
                     )}
                   </div>
-                  <span className="text-xs font-medium text-slate-600">v{version.version}</span>
-                  <StatusPill status={version.status} />
-                  <span className="text-xs text-slate-500">{new Date(version.created_at).toLocaleString("zh-CN")}</span>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => void loadDocumentVersionCompare(version)}
-                      disabled={!version.document_id || versionCompareLoadingId === version.id}
-                      className="ui-button-secondary h-11 px-3 text-xs sm:h-8 sm:px-2"
-                      title="对比当前版本"
-                    >
-                      {versionCompareLoadingId === version.id ? <Loader2 className="animate-spin" size={14} /> : <GitCompareArrows size={14} />}
-                      对比
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void rollbackDocumentVersion(version)}
-                      disabled={!version.document_id || deletingId === `rollback:${version.id}`}
-                      className="ui-button-secondary h-11 px-3 text-xs sm:h-8 sm:px-2"
-                      title="回滚到该版本"
-                    >
-                      {deletingId === `rollback:${version.id}` ? <Loader2 className="animate-spin" size={14} /> : <RotateCcw size={14} />}
-                      回滚
-                    </button>
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 2xl:justify-end">
+                    <span className="shrink-0 text-xs font-medium text-slate-600">v{version.version}</span>
+                    <StatusPill status={version.status} />
+                    <span className="shrink-0 text-xs text-slate-500">{new Date(version.created_at).toLocaleString("zh-CN")}</span>
+                    <div className="flex shrink-0 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void loadDocumentVersionCompare(version)}
+                        disabled={!version.document_id || versionCompareLoadingId === version.id}
+                        className="ui-button-secondary h-11 px-3 text-xs sm:h-8 sm:px-2"
+                        title="对比当前版本"
+                      >
+                        {versionCompareLoadingId === version.id ? <Loader2 className="animate-spin" size={14} /> : <GitCompareArrows size={14} />}
+                        对比
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void rollbackDocumentVersion(version)}
+                        disabled={!version.document_id || deletingId === `rollback:${version.id}`}
+                        className="ui-button-secondary h-11 px-3 text-xs sm:h-8 sm:px-2"
+                        title="回滚到该版本"
+                      >
+                        {deletingId === `rollback:${version.id}` ? <Loader2 className="animate-spin" size={14} /> : <RotateCcw size={14} />}
+                        回滚
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
