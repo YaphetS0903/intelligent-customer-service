@@ -1,0 +1,16 @@
+.git
+.github
+.next
+node_modules
+.env
+.env.*
+!.env.example
+.data
+.ops
+uploads
+backups
+test-results
+playwright-report
+*.log
+winmail_openapi_1.2
+三期3A首批系统接入开发规划.md
