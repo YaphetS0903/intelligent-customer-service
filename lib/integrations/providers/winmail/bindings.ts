@@ -4,9 +4,10 @@ import { maskEmail } from "@/lib/integrations/config";
 import { verifyWinmailMailboxCredentials } from "@/lib/integrations/providers/winmail/client";
 import { deleteUserIdentity, listUserIdentities, upsertUserIdentity } from "@/lib/integrations/store";
 import { deleteUserCredential, findUserCredential, upsertUserCredential } from "@/lib/integrations/tool-store";
+import type { UserProfile } from "@/lib/types";
 
-export async function getCurrentWinmailBinding() {
-  const user = await getCurrentUser();
+export async function getCurrentWinmailBinding(currentUser?: UserProfile) {
+  const user = currentUser ?? await getCurrentUser();
   const [identities, credential] = await Promise.all([listUserIdentities(5000), findUserCredential("winmail", user.id)]);
   const identity = identities.find((item) => item.connector_id === "winmail" && item.user_id === user.id && item.status === "verified");
   return {
@@ -17,8 +18,8 @@ export async function getCurrentWinmailBinding() {
   };
 }
 
-export async function bindCurrentWinmailMailbox(input: { email: string; password: string }) {
-  const user = await getCurrentUser();
+export async function bindCurrentWinmailMailbox(input: { email: string; password: string }, currentUser?: UserProfile) {
+  const user = currentUser ?? await getCurrentUser();
   if (!integrationCredentialEncryptionConfigured()) throw new Error("服务器尚未配置邮箱凭证加密密钥");
   const email = normalizeEmail(input.email);
   if (!email || !input.password) throw new Error("请输入完整邮箱地址和邮箱密码");
@@ -57,8 +58,8 @@ export async function bindCurrentWinmailMailbox(input: { email: string; password
   }
 }
 
-export async function unbindCurrentWinmailMailbox() {
-  const user = await getCurrentUser();
+export async function unbindCurrentWinmailMailbox(currentUser?: UserProfile) {
+  const user = currentUser ?? await getCurrentUser();
   await deleteUserCredential("winmail", user.id);
   await deleteUserIdentity("winmail", user.id);
   return { bound: false };

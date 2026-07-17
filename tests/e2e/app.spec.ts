@@ -256,6 +256,21 @@ test.describe("天瑞内饰智能客服回归", () => {
     });
     expect(tts.status()).toBe(401);
 
+    const tool = await page.request.post("/api/tools/execute", {
+      data: {},
+      failOnStatusCode: false
+    });
+    expect(tool.status()).toBe(401);
+    expect((await tool.json()).code).toBe("UNAUTHENTICATED");
+
+    const bindMailbox = await page.request.post("/api/integrations/winmail/binding", {
+      data: {},
+      failOnStatusCode: false
+    });
+    expect(bindMailbox.status()).toBe(401);
+    const unbindMailbox = await page.request.delete("/api/integrations/winmail/binding", { failOnStatusCode: false });
+    expect(unbindMailbox.status()).toBe(401);
+
     await tryLogin(page, "employee");
     const dashboard = await page.request.get("/api/dashboard", { failOnStatusCode: false });
     expect(dashboard.status()).toBe(403);

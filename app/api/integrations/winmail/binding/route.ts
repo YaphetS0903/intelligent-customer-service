@@ -1,32 +1,39 @@
 import { NextResponse } from "next/server";
+import { getCurrentUser } from "@/lib/db";
 import { bindCurrentWinmailMailbox, getCurrentWinmailBinding, unbindCurrentWinmailMailbox } from "@/lib/integrations/providers/winmail/bindings";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    return NextResponse.json({ binding: await getCurrentWinmailBinding() });
+    const user = await getCurrentUser();
+    return NextResponse.json({ binding: await getCurrentWinmailBinding(user) });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "读取邮箱绑定失败" }, { status: 401 });
+    const message = error instanceof Error ? error.message : "读取邮箱绑定失败";
+    return NextResponse.json({ error: message }, { status: message === "请先登录" ? 401 : 500 });
   }
 }
 
 export async function POST(request: Request) {
   try {
+    const user = await getCurrentUser();
     const body = await request.json();
     return NextResponse.json({ binding: await bindCurrentWinmailMailbox({
       email: String(body.email ?? ""),
       password: String(body.password ?? "")
-    }) });
+    }, user) });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "绑定邮箱失败" }, { status: 400 });
+    const message = error instanceof Error ? error.message : "绑定邮箱失败";
+    return NextResponse.json({ error: message }, { status: message === "请先登录" ? 401 : 400 });
   }
 }
 
 export async function DELETE() {
   try {
-    return NextResponse.json({ binding: await unbindCurrentWinmailMailbox() });
+    const user = await getCurrentUser();
+    return NextResponse.json({ binding: await unbindCurrentWinmailMailbox(user) });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "解绑邮箱失败" }, { status: 400 });
+    const message = error instanceof Error ? error.message : "解绑邮箱失败";
+    return NextResponse.json({ error: message }, { status: message === "请先登录" ? 401 : 400 });
   }
 }

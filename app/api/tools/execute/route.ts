@@ -15,7 +15,9 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ tool: { id: result.tool.id, name: result.tool.name }, execution_id: result.execution.id, result: result.result });
   } catch (error) {
-    const status = error instanceof ToolGatewayError ? error.status : 400;
-    return NextResponse.json({ error: error instanceof Error ? error.message : "业务工具执行失败", code: error instanceof ToolGatewayError ? error.code : "TOOL_EXECUTION_FAILED" }, { status });
+    const message = error instanceof Error ? error.message : "业务工具执行失败";
+    const unauthenticated = message === "请先登录";
+    const status = error instanceof ToolGatewayError ? error.status : unauthenticated ? 401 : 400;
+    return NextResponse.json({ error: message, code: error instanceof ToolGatewayError ? error.code : unauthenticated ? "UNAUTHENTICATED" : "TOOL_EXECUTION_FAILED" }, { status });
   }
 }
