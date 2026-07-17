@@ -92,6 +92,8 @@ export type WecomDirectorySyncResult = {
   matched: number;
   profiles_updated: number;
   disabled: number;
+  accounts_disabled: number;
+  accounts_restored: number;
   conflicts: number;
   run: IntegrationSyncRun;
 };

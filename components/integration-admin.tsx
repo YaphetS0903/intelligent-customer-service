@@ -8,7 +8,7 @@ import type { IntegrationConnector, IntegrationDeliveryLog, IntegrationDirectory
 type Dashboard = {
   connectors: IntegrationConnector[];
   configs: {
-    wecom: { enabled: boolean; sso_enabled: boolean; notification_enabled: boolean; configured: boolean; notification_configured: boolean; corp_id_masked: string; corp_secret_configured: boolean; agent_id: string; api_base_url: string; root_department_id: number; sync_profile_fields: boolean; auto_provision_users: boolean };
+    wecom: { enabled: boolean; sso_enabled: boolean; notification_enabled: boolean; configured: boolean; notification_configured: boolean; corp_id_masked: string; corp_secret_configured: boolean; agent_id: string; api_base_url: string; root_department_id: number; sync_profile_fields: boolean; auto_provision_users: boolean; directory_sync_enabled: boolean; directory_sync_interval_minutes: number; sync_cron_secret_configured: boolean };
     winmail: { enabled: boolean; notification_enabled: boolean; configured: boolean; api_url: string; api_key_masked: string; api_secret_configured: boolean; sender_user_masked: string; sender_password_configured: boolean; sender_name: string; allow_insecure_http: boolean; timeout_ms: number };
   };
   directory: { members: Array<IntegrationDirectoryMember & { local_user?: { id: string; name: string; email: string; department: string; position: string } | null }>; total: number; active: number; matched: number; unmatched: number };
@@ -97,7 +97,11 @@ export function IntegrationAdmin() {
       const response = await fetch("/api/admin/integrations/wecom/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ update_profiles: updateProfiles }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "同步失败");
-      pushToast({ tone: "success", title: "企业微信通讯录已同步", description: `${data.result.members} 位成员，匹配 ${data.result.matched} 个系统账号` });
+      pushToast({
+        tone: "success",
+        title: "企业微信通讯录已同步",
+        description: `${data.result.members} 位成员，更新资料 ${data.result.profiles_updated} 个，禁用账号 ${data.result.accounts_disabled} 个，恢复账号 ${data.result.accounts_restored} 个。`
+      });
       setView("directory");
       await load();
     } catch (error) {
@@ -236,6 +240,8 @@ export function IntegrationAdmin() {
               <Toggle name="WECOM_SSO_ENABLED" label="启用企业微信单点登录" defaultChecked={dashboard.configs.wecom.sso_enabled} />
               <Toggle name="WECOM_SYNC_PROFILE_FIELDS" label="默认同步部门/岗位" defaultChecked={dashboard.configs.wecom.sync_profile_fields} />
               <Toggle name="WECOM_AUTO_PROVISION_USERS" label="首次登录自动创建员工账号" defaultChecked={dashboard.configs.wecom.auto_provision_users} />
+              <Toggle name="WECOM_DIRECTORY_SYNC_ENABLED" label="启用员工生命周期定时同步" defaultChecked={dashboard.configs.wecom.directory_sync_enabled} />
+              <Field name="WECOM_DIRECTORY_SYNC_INTERVAL_MINUTES" label="同步间隔（分钟）" defaultValue={String(dashboard.configs.wecom.directory_sync_interval_minutes)} inputMode="numeric" />
               <Field name="WECOM_CORP_ID" label="CorpID" placeholder={dashboard.configs.wecom.corp_id_masked || "wwxxxxxxxx"} />
               <SecretField name="WECOM_CORP_SECRET" label="CorpSecret" configured={dashboard.configs.wecom.corp_secret_configured} />
               <Field name="WECOM_AGENT_ID" label="应用 AgentID" defaultValue={dashboard.configs.wecom.agent_id} />
@@ -246,6 +252,11 @@ export function IntegrationAdmin() {
             <div className="mt-4 border-t border-line pt-4">
               <label className="flex min-h-11 items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={updateProfiles} onChange={(event) => setUpdateProfiles(event.target.checked)} />本次同步更新已匹配账号的姓名、部门和岗位</label>
               <button type="button" onClick={() => void syncDirectory()} disabled={working !== null || !dashboard.configs.wecom.enabled || !dashboard.configs.wecom.configured} className="ui-button-success mt-2 h-10 w-full">{working === "wecom:sync" ? <Loader2 size={16} className="animate-spin" /> : <UsersRound size={16} />}同步企业微信通讯录</button>
+              <p className={`mt-2 text-xs ${dashboard.configs.wecom.directory_sync_enabled && dashboard.configs.wecom.sync_cron_secret_configured ? "text-emerald-700" : "text-slate-500"}`}>
+                {dashboard.configs.wecom.directory_sync_enabled
+                  ? `定时同步每 ${dashboard.configs.wecom.directory_sync_interval_minutes} 分钟检查一次员工状态${dashboard.configs.wecom.sync_cron_secret_configured ? "，调度已就绪。" : "，但服务器调度密钥尚未配置。"}`
+                  : "定时同步未启用，当前只在管理员手动操作时更新通讯录。"}
+              </p>
             </div>
             <div className="mt-4 border-t border-line pt-4"><label className="text-sm font-medium text-slate-700" htmlFor="wecom-test-user">测试接收账号</label><div className="mt-2 flex flex-col gap-2 sm:flex-row"><select id="wecom-test-user" value={testWecomUserId} onChange={(event) => setTestWecomUserId(event.target.value)} className="ui-input h-10 min-w-0 flex-1"><option value="">{wecomRecipients.length ? "请选择已匹配账号" : "暂无已匹配账号"}</option>{wecomRecipients.map((identity) => <option key={identity.id} value={identity.user_id}>{identity.local_user?.name}（{identity.local_user?.email}）</option>)}</select><button type="button" onClick={requestTestWecomMessage} disabled={working !== null || !testWecomUserId || !dashboard.configs.wecom.enabled || !dashboard.configs.wecom.notification_configured} className="ui-button-success h-10">{working === "wecom:message" ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}发送测试消息</button></div>{!dashboard.configs.wecom.notification_configured && <p className="mt-2 text-xs text-amber-700">配置应用 AgentID 后才可发送应用消息。</p>}</div>
           </ConnectorPanel>
@@ -306,8 +317,10 @@ function BindingDialog({ member, users, identities, userId, working, onUserChang
 }
 
 function LogsView({ runs, deliveries }: { runs: IntegrationSyncRun[]; deliveries: IntegrationDeliveryLog[] }) {
-  return <section className="grid gap-3 xl:grid-cols-2"><div className="ui-card p-4"><h2 className="text-base font-semibold text-ink">通讯录同步记录</h2><div className="mt-3 space-y-2">{runs.slice(0, 20).map((run) => <div key={run.id} className="rounded-lg border border-line px-3 py-3"><div className="flex items-center justify-between gap-3"><p className="text-sm font-semibold text-ink">{run.connector_id === "wecom" ? "企业微信通讯录" : run.connector_id}</p><RunStatus status={run.status} /></div><p className="mt-2 text-xs text-slate-500">总数 {run.total_count} · 匹配 {run.matched_count} · 更新 {run.updated_count} · 失败 {run.failed_count}</p>{run.error_message && <p className="mt-2 text-xs text-red-700">{run.error_message}</p>}<p className="mt-2 text-xs text-slate-400">{formatDate(run.started_at)}</p></div>)}{runs.length === 0 && <p className="py-8 text-center text-sm text-slate-500">暂无同步记录。</p>}</div></div><div className="ui-card p-4"><h2 className="text-base font-semibold text-ink">外部通知投递记录</h2><div className="mt-3 space-y-2">{deliveries.slice(0, 30).map((item) => <div key={item.id} className="rounded-lg border border-line px-3 py-3"><div className="flex items-center justify-between gap-3"><p className="min-w-0 truncate text-sm font-semibold text-ink">{item.subject}</p><DeliveryStatus status={item.status} /></div><p className="mt-2 text-xs font-medium text-slate-600">{item.connector_id === "wecom" ? "企业微信应用消息" : "Winmail 邮件"}</p><p className="mt-1 text-xs text-slate-500">{item.recipient_masked || "未记录收件人"}{item.latency_ms !== null ? ` · ${item.latency_ms}ms` : ""}</p>{item.error_message && <p className="mt-2 text-xs text-red-700">{item.error_message}</p>}<p className="mt-2 text-xs text-slate-400">{formatDate(item.created_at)}</p></div>)}{deliveries.length === 0 && <p className="py-8 text-center text-sm text-slate-500">暂无外部通知投递记录。</p>}</div></div></section>;
+  return <section className="grid gap-3 xl:grid-cols-2"><div className="ui-card p-4"><h2 className="text-base font-semibold text-ink">通讯录同步记录</h2><div className="mt-3 space-y-2">{runs.slice(0, 20).map((run) => <div key={run.id} className="rounded-lg border border-line px-3 py-3"><div className="flex items-center justify-between gap-3"><p className="text-sm font-semibold text-ink">{run.connector_id === "wecom" ? `企业微信通讯录 · ${run.operation === "directory.sync.schedule" ? "定时" : "手动"}` : run.connector_id}</p><RunStatus status={run.status} /></div><p className="mt-2 text-xs text-slate-500">总数 {run.total_count} · 匹配 {run.matched_count} · 资料更新 {metadataNumber(run, "profiles_updated")} · 禁用 {metadataNumber(run, "accounts_disabled")} · 恢复 {metadataNumber(run, "accounts_restored")}</p>{run.error_message && <p className="mt-2 text-xs text-red-700">{run.error_message}</p>}<p className="mt-2 text-xs text-slate-400">{formatDate(run.started_at)}</p></div>)}{runs.length === 0 && <p className="py-8 text-center text-sm text-slate-500">暂无同步记录。</p>}</div></div><div className="ui-card p-4"><h2 className="text-base font-semibold text-ink">外部通知投递记录</h2><div className="mt-3 space-y-2">{deliveries.slice(0, 30).map((item) => <div key={item.id} className="rounded-lg border border-line px-3 py-3"><div className="flex items-center justify-between gap-3"><p className="min-w-0 truncate text-sm font-semibold text-ink">{item.subject}</p><DeliveryStatus status={item.status} /></div><p className="mt-2 text-xs font-medium text-slate-600">{item.connector_id === "wecom" ? "企业微信应用消息" : "Winmail 邮件"}</p><p className="mt-1 text-xs text-slate-500">{item.recipient_masked || "未记录收件人"}{item.latency_ms !== null ? ` · ${item.latency_ms}ms` : ""}</p>{item.error_message && <p className="mt-2 text-xs text-red-700">{item.error_message}</p>}<p className="mt-2 text-xs text-slate-400">{formatDate(item.created_at)}</p></div>)}{deliveries.length === 0 && <p className="py-8 text-center text-sm text-slate-500">暂无外部通知投递记录。</p>}</div></div></section>;
 }
+
+function metadataNumber(run: IntegrationSyncRun, key: string) { const value = Number(run.metadata[key] ?? 0); return Number.isFinite(value) ? value : 0; }
 
 function Field({ name, label, defaultValue, placeholder, className = "", inputMode }: { name: string; label: string; defaultValue?: string; placeholder?: string; className?: string; inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"] }) { return <label className={`block ${className}`}><span className="text-sm font-medium text-slate-700">{label}</span><input name={name} defaultValue={defaultValue} placeholder={placeholder} inputMode={inputMode} className="ui-input mt-1 h-11 w-full" /></label>; }
 function SecretField({ name, label, configured }: { name: string; label: string; configured: boolean }) { return <label className="block"><span className="text-sm font-medium text-slate-700">{label}</span><input type="password" name={name} autoComplete="new-password" placeholder={configured ? "已配置，留空保留原值" : "请填写"} className="ui-input mt-1 h-11 w-full" /></label>; }

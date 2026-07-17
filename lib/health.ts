@@ -646,8 +646,10 @@ export async function getSystemHealth(): Promise<SystemHealth> {
       name: "企业统一登录",
       status: hasUnifiedIdentityConfig ? "ready" : "warning",
       detail: hasWecomSsoConfig
-        ? getWecomConfig().autoProvisionUsers
-          ? "已启用企业微信单点登录和首次登录自动开户。在职成员首次登录时会创建普通员工账号并绑定 userid。"
+        ? wecomConfig.autoProvisionUsers
+          ? wecomConfig.directorySyncEnabled
+            ? `已启用企业微信单点登录、首次登录自动开户和每 ${wecomConfig.directorySyncIntervalMinutes} 分钟员工生命周期同步。`
+            : "已启用企业微信单点登录和首次登录自动开户，但员工生命周期定时同步尚未启用。"
           : "已启用企业微信单点登录。员工通过已验证的 userid 映射登录，未绑定成员需要管理员处理。"
         : hasSsoConfig()
         ? "已配置 OIDC 统一登录。登录页会显示企业统一登录入口，首次登录员工会自动建号。"

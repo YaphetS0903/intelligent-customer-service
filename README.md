@@ -612,11 +612,16 @@ WECOM_CORP_ID=企业ID
 WECOM_CORP_SECRET=自建应用Secret
 WECOM_AGENT_ID=自建应用AgentID
 WECOM_AUTO_PROVISION_USERS=true
+WECOM_DIRECTORY_SYNC_ENABLED=true
+WECOM_DIRECTORY_SYNC_INTERVAL_MINUTES=30
+WECOM_SYNC_CRON_SECRET=至少32位随机密钥
 ```
 
 启用 `WECOM_SSO_ENABLED` 后，登录页会显示独立的“企业微信登录”入口。桌面浏览器跳转企业微信新版扫码登录页；从企业微信工作台进入时，系统先静默确认员工身份，再通过官方 `openDefaultBrowser` 接口把 OAuth2 登录地址交给系统默认浏览器，实现免扫码登录。接力页为 `/wecom/open`，默认浏览器回调为 `/api/auth/wecom/external/callback`；客户端无法调用默认浏览器时，页面会保留重试和继续在企业微信内使用两个入口。
 
 启用 `WECOM_AUTO_PROVISION_USERS` 后，已同步通讯录中的在职成员首次登录会自动创建无本地密码的普通员工账号并绑定 `userid`；管理员账号仍必须手工确认绑定。关闭该开关时，企业微信登录只接受“业务集成”中已有的已验证映射。两种模式都不会按姓名猜测账号。应用后台的 OAuth 可信域名、Web 网页授权回调域名和 JS-SDK 可信域名应配置为与 `APP_BASE_URL` 完全一致的主机和端口，例如 `mail.trqcns.com:4009`。正式环境应尽快启用 HTTPS，避免 OAuth2 临时授权参数在明文链路上传输。
+
+启用 `WECOM_DIRECTORY_SYNC_ENABLED` 后，服务器应每 5 分钟执行一次 `node /app/scripts/run-wecom-sync-cron.mjs`。脚本会调用带密钥保护的内部同步接口，系统再根据 `WECOM_DIRECTORY_SYNC_INTERVAL_MINUTES` 判断是否到期。定时同步会更新在职成员的姓名、部门和岗位；只对企业微信自动创建的普通员工账号执行离职禁用和复职恢复，不会自动修改管理员或手工管理账号。同步结果会记录资料更新、禁用和恢复数量。
 
 应用消息仅投递给已验证映射的账号；没有映射时会记录为“已跳过”，不会按姓名、手机号或相似邮箱猜测接收人。管理员可在 `/admin/integrations` 选择已匹配账号发送测试消息，并查看企业微信与 Winmail 的统一投递记录。
 

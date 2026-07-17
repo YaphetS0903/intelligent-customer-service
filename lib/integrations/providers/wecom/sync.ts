@@ -1,23 +1,40 @@
 import { listUsers, updateUserProfile } from "@/lib/db";
 import { getPublicIntegrationConfigs, getWecomConfig, maskEmail } from "@/lib/integrations/config";
 import { fetchWecomDirectory } from "@/lib/integrations/providers/wecom/client";
+import { decideWecomLifecycleAction, isWecomMemberActive } from "@/lib/integrations/providers/wecom/lifecycle-rules";
 import {
   finishSyncRun,
-  markMissingDirectoryMembers,
+  listDirectoryMembers,
+  listUserIdentities,
   startSyncRun,
   updateConnectorState,
   upsertDirectoryMember,
-  upsertUserIdentity,
-  listDirectoryMembers,
-  listUserIdentities
+  upsertUserIdentity
 } from "@/lib/integrations/store";
-import type { WecomDirectorySyncResult } from "@/lib/integrations/types";
+import type { IntegrationUserIdentity, WecomDirectorySyncResult } from "@/lib/integrations/types";
 
-export async function syncWecomDirectory(input: { startedBy: string; updateProfiles?: boolean }): Promise<WecomDirectorySyncResult> {
+type SyncInput = {
+  startedBy: string;
+  updateProfiles?: boolean;
+  trigger?: "manual" | "schedule";
+};
+
+let activeSync: Promise<WecomDirectorySyncResult> | null = null;
+
+export function syncWecomDirectory(input: SyncInput): Promise<WecomDirectorySyncResult> {
+  activeSync ??= runWecomDirectorySync(input).finally(() => {
+    activeSync = null;
+  });
+  return activeSync;
+}
+
+async function runWecomDirectorySync(input: SyncInput): Promise<WecomDirectorySyncResult> {
   const config = getWecomConfig();
   if (!config.enabled) throw new Error("企业微信连接器未启用");
-  const run = await startSyncRun("wecom", "directory.sync", input.startedBy);
+  const operation = input.trigger === "schedule" ? "directory.sync.schedule" : "directory.sync";
+  const run = await startSyncRun("wecom", operation, input.startedBy);
   const startedAt = Date.now();
+
   try {
     const [directory, localUsers, existingMembers, existingIdentities] = await Promise.all([
       fetchWecomDirectory(),
@@ -29,10 +46,10 @@ export async function syncWecomDirectory(input: { startedBy: string; updateProfi
     const localByEmail = new Map(localUsers.map((user) => [normalizeEmail(user.email), user]));
     const localById = new Map(localUsers.map((user) => [user.id, user]));
     const previousMemberByExternalId = new Map(existingMembers.map((member) => [member.external_user_id, member]));
-    const verifiedIdentityByExternalId = new Map(existingIdentities
-      .filter((identity) => identity.connector_id === "wecom" && identity.status === "verified")
+    const identityByExternalId = new Map(existingIdentities
+      .filter((identity) => identity.connector_id === "wecom" && identity.status !== "conflict")
       .map((identity) => [identity.external_user_id, identity]));
-    const boundUserIds = new Set(verifiedIdentityByExternalId.values().map((identity) => identity.user_id));
+    const boundUserIds = new Set(identityByExternalId.values().map((identity) => identity.user_id));
     const externalEmailCounts = new Map<string, number>();
     for (const member of directory.users) {
       const email = normalizeEmail(member.email || member.biz_mail || "");
@@ -41,7 +58,9 @@ export async function syncWecomDirectory(input: { startedBy: string; updateProfi
 
     let matched = 0;
     let profilesUpdated = 0;
-    let disabled = 0;
+    let accountsDisabled = 0;
+    let accountsRestored = 0;
+    let disabledMembers = 0;
     let conflicts = 0;
     const activeExternalIds = new Set<string>();
     const syncedAt = new Date().toISOString();
@@ -52,37 +71,69 @@ export async function syncWecomDirectory(input: { startedBy: string; updateProfi
       const email = normalizeEmail(member.email || member.biz_mail || "");
       const conflict = Boolean(email && (externalEmailCounts.get(email) ?? 0) > 1);
       const previousMember = previousMemberByExternalId.get(member.userid);
-      const verifiedIdentity = verifiedIdentityByExternalId.get(member.userid);
-      const identityUser = verifiedIdentity ? localById.get(verifiedIdentity.user_id) ?? null : null;
-      const emailUser = conflict || previousMember?.metadata.manual_unbound === true ? null : localByEmail.get(email) ?? null;
-      const localUser = identityUser ?? (emailUser && !boundUserIds.has(emailUser.id) ? emailUser : null);
-      const active = member.enable !== 0 && member.status !== 5;
+      const identity = identityByExternalId.get(member.userid);
+      const identityUser = identity ? localById.get(identity.user_id) ?? null : null;
+      const emailUser = email && !conflict && previousMember?.metadata.manual_unbound !== true
+        ? localByEmail.get(email) ?? null
+        : null;
+      let localUser = identityUser ?? (emailUser && !boundUserIds.has(emailUser.id) ? emailUser : null);
+      const active = isWecomMemberActive(member.enable, member.status);
       const names = member.department.map((id) => departmentNames.get(id)).filter((name): name is string => Boolean(name));
+
       if (conflict) conflicts += 1;
-      if (!active) disabled += 1;
+      if (!active) disabledMembers += 1;
+
       if (localUser) {
         matched += 1;
-        if (shouldUpdateProfiles) {
+        const lifecycleAction = decideWecomLifecycleAction({
+          memberActive: active,
+          bindingSource: identity?.binding_source,
+          identityMetadata: identity?.metadata,
+          userRole: localUser.role,
+          userStatus: localUser.status
+        });
+        if (lifecycleAction === "disable") {
+          localUser = await updateUserProfile(localUser.id, { status: "disabled" });
+          localById.set(localUser.id, localUser);
+          accountsDisabled += 1;
+        } else if (lifecycleAction === "restore") {
+          localUser = await updateUserProfile(localUser.id, { status: "active" });
+          localById.set(localUser.id, localUser);
+          accountsRestored += 1;
+        }
+
+        if (active && shouldUpdateProfiles) {
           const department = names[0] ?? localUser.department;
           const position = member.position?.trim() || localUser.position;
-          if (department !== localUser.department || position !== localUser.position || member.name.trim() !== localUser.name) {
-            await updateUserProfile(localUser.id, { name: member.name.trim() || localUser.name, department, position });
+          const name = member.name.trim() || localUser.name;
+          if (department !== localUser.department || position !== localUser.position || name !== localUser.name) {
+            localUser = await updateUserProfile(localUser.id, { name, department, position });
+            localById.set(localUser.id, localUser);
             profilesUpdated += 1;
           }
         }
+
+        const identityMetadata = lifecycleMetadata(identity, {
+          active,
+          action: lifecycleAction,
+          reason: active ? null : "directory_disabled",
+          syncedAt,
+          userStatus: localUser.status
+        });
         await upsertUserIdentity({
           connector_id: "wecom",
           user_id: localUser.id,
           external_user_id: member.userid,
           external_login: member.userid,
           external_email: email,
-          binding_source: verifiedIdentity?.binding_source ?? "email",
+          binding_source: identity?.binding_source ?? "email",
           status: active ? "verified" : "inactive",
-          verified_at: syncedAt,
+          verified_at: active ? identity?.verified_at ?? syncedAt : identity?.verified_at ?? null,
           last_synced_at: syncedAt,
-          metadata: { ...verifiedIdentity?.metadata, department_ids: member.department, main_department: member.main_department ?? null }
+          metadata: { ...identityMetadata, department_ids: member.department, main_department: member.main_department ?? null }
         });
       }
+
       await upsertDirectoryMember({
         connector_id: "wecom",
         external_user_id: member.userid,
@@ -104,16 +155,70 @@ export async function syncWecomDirectory(input: { startedBy: string; updateProfi
       });
     }
 
-    const missing = await markMissingDirectoryMembers("wecom", activeExternalIds);
+    const missingMembers = existingMembers.filter((member) => !activeExternalIds.has(member.external_user_id));
+    for (const member of missingMembers) {
+      const identity = identityByExternalId.get(member.external_user_id);
+      let localUser = identity ? localById.get(identity.user_id) ?? null : null;
+      const lifecycleAction = localUser ? decideWecomLifecycleAction({
+        memberActive: false,
+        bindingSource: identity?.binding_source,
+        identityMetadata: identity?.metadata,
+        userRole: localUser.role,
+        userStatus: localUser.status
+      }) : "none";
+      if (localUser && lifecycleAction === "disable") {
+        localUser = await updateUserProfile(localUser.id, { status: "disabled" });
+        localById.set(localUser.id, localUser);
+        accountsDisabled += 1;
+      }
+      if (identity) {
+        await upsertUserIdentity({
+          connector_id: "wecom",
+          user_id: identity.user_id,
+          external_user_id: identity.external_user_id,
+          external_login: identity.external_login,
+          external_email: identity.external_email,
+          binding_source: identity.binding_source,
+          status: "inactive",
+          verified_at: identity.verified_at,
+          last_synced_at: syncedAt,
+          metadata: lifecycleMetadata(identity, {
+            active: false,
+            action: lifecycleAction,
+            reason: "directory_missing",
+            syncedAt,
+            userStatus: localUser?.status ?? "disabled"
+          })
+        });
+      }
+      await upsertDirectoryMember({
+        ...member,
+        status: "missing",
+        matched_user_id: identity?.user_id ?? member.matched_user_id,
+        metadata: { ...member.metadata, missing_since: member.metadata.missing_since ?? syncedAt },
+        synced_at: syncedAt
+      });
+    }
+
+    const updatedCount = profilesUpdated + accountsDisabled + accountsRestored;
     const completed = await finishSyncRun(run.id, {
       status: conflicts > 0 ? "partial" : "success",
       total_count: directory.users.length,
       success_count: directory.users.length - conflicts,
       matched_count: matched,
-      updated_count: profilesUpdated,
+      updated_count: updatedCount,
       failed_count: conflicts,
       error_message: conflicts > 0 ? `${conflicts} 个成员邮箱重复，未自动绑定` : null,
-      metadata: { departments: directory.departments.length, missing, update_profiles: shouldUpdateProfiles }
+      metadata: {
+        departments: directory.departments.length,
+        missing: missingMembers.length,
+        disabled_members: disabledMembers,
+        profiles_updated: profilesUpdated,
+        accounts_disabled: accountsDisabled,
+        accounts_restored: accountsRestored,
+        update_profiles: shouldUpdateProfiles,
+        trigger: input.trigger ?? "manual"
+      }
     });
     await updateConnectorState("wecom", {
       enabled: true,
@@ -124,13 +229,60 @@ export async function syncWecomDirectory(input: { startedBy: string; updateProfi
       last_error: conflicts > 0 ? `${conflicts} 个成员邮箱冲突` : null,
       latency_ms: Date.now() - startedAt
     });
-    return { departments: directory.departments.length, members: directory.users.length, matched, profiles_updated: profilesUpdated, disabled, conflicts, run: completed ?? run };
+    return {
+      departments: directory.departments.length,
+      members: directory.users.length,
+      matched,
+      profiles_updated: profilesUpdated,
+      disabled: disabledMembers + missingMembers.length,
+      accounts_disabled: accountsDisabled,
+      accounts_restored: accountsRestored,
+      conflicts,
+      run: completed ?? run
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : "企业微信通讯录同步失败";
     await finishSyncRun(run.id, { status: "failed", failed_count: 1, error_message: message });
-    await updateConnectorState("wecom", { enabled: config.enabled, health_status: "error", public_config: getPublicIntegrationConfigs().wecom, last_checked_at: new Date().toISOString(), last_error: message, latency_ms: Date.now() - startedAt });
+    await updateConnectorState("wecom", {
+      enabled: config.enabled,
+      health_status: "error",
+      public_config: getPublicIntegrationConfigs().wecom,
+      last_checked_at: new Date().toISOString(),
+      last_error: message,
+      latency_ms: Date.now() - startedAt
+    });
     throw error;
   }
+}
+
+function lifecycleMetadata(
+  identity: IntegrationUserIdentity | undefined,
+  input: {
+    active: boolean;
+    action: "disable" | "restore" | "none";
+    reason: "directory_disabled" | "directory_missing" | null;
+    syncedAt: string;
+    userStatus: string;
+  }
+) {
+  const metadata = { ...identity?.metadata };
+  if (input.action === "disable") {
+    return {
+      ...metadata,
+      lifecycle_disabled: true,
+      lifecycle_disabled_at: input.syncedAt,
+      lifecycle_disabled_reason: input.reason
+    };
+  }
+  if (input.action === "restore" || input.active && input.userStatus === "active" && metadata.lifecycle_disabled === true) {
+    return {
+      ...metadata,
+      lifecycle_disabled: false,
+      lifecycle_restored_at: input.syncedAt,
+      lifecycle_disabled_reason: null
+    };
+  }
+  return metadata;
 }
 
 function normalizeEmail(value: string) {
