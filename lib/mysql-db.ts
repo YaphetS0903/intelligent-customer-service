@@ -1457,7 +1457,7 @@ export async function getActiveDocumentApprovalRequest(documentId: string) {
   const rows = await mysqlQuery<Row[]>(
     `select * from document_approval_requests
       where document_id = :documentId and status in ('pending', 'approved', 'published')
-      order by created_at desc limit 1`,
+      order by (active_key = 'active') desc, created_at desc, id desc limit 1`,
     { documentId }
   );
   return rows[0] ? documentApprovalRequestFromRow(rows[0]) : null;

@@ -528,6 +528,7 @@ test.describe("天瑞内饰智能客服回归", () => {
     await expect(page.getByRole("button", { name: "新增用户" })).toBeVisible();
     const usersHeaderBox = await page.getByTestId("users-header").boundingBox();
     expect(usersHeaderBox?.height ?? 999).toBeLessThanOrEqual(80);
+    await expect(page.getByRole("button", { name: "刷新" })).toBeEnabled();
     const reviewerTab = page.getByRole("tab", { name: /^审批授权 · \d+$/ });
     await reviewerTab.click();
     await expect(reviewerTab).toHaveAttribute("aria-selected", "true");

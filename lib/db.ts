@@ -1408,16 +1408,27 @@ export async function getActiveDocumentApprovalRequest(documentId: string): Prom
       item.document_id === documentId && (item.status === "pending" || item.status === "approved" || item.status === "published")
     ) ?? null;
   }
-  const { data, error } = await supabase
+  const { data: active, error: activeError } = await supabase
     .from("document_approval_requests")
     .select("*")
     .eq("document_id", documentId)
-    .in("status", ["pending", "approved", "published"])
+    .in("status", ["pending", "approved"])
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (error) throw new Error(error.message);
-  return data;
+  if (activeError) throw new Error(activeError.message);
+  if (active) return active;
+
+  const { data: published, error: publishedError } = await supabase
+    .from("document_approval_requests")
+    .select("*")
+    .eq("document_id", documentId)
+    .eq("status", "published")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (publishedError) throw new Error(publishedError.message);
+  return published;
 }
 
 export async function createDocumentApprovalRequest(
