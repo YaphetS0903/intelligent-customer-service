@@ -326,7 +326,7 @@ export function UserAdmin() {
         />
       )}
 
-      <section className="ui-card grid grid-cols-2 gap-1 p-1.5" aria-label="用户与权限视图">
+      <section className="ui-card grid grid-cols-2 gap-1 p-1.5" role="tablist" aria-label="用户与权限视图">
         <UserViewButton active={activeView === "accounts"} onClick={() => setActiveView("accounts")}>
           账号管理 · {users.length}
         </UserViewButton>
@@ -968,6 +968,8 @@ function UserViewButton({ active, onClick, children }: { active: boolean; onClic
   return (
     <button
       type="button"
+      role="tab"
+      aria-selected={active}
       onClick={onClick}
       className={`h-10 rounded-md px-3 text-sm font-semibold transition ${active ? "bg-brand text-white" : "text-slate-600 hover:bg-slate-100"}`}
     >
