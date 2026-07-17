@@ -374,7 +374,7 @@ test.describe("天瑞内饰智能客服回归", () => {
 
     await loginWithCredentials(page, first.email, first.password);
     const chatResponse = await page.request.post("/api/chat", {
-      data: { message: `请回答安全测试问题 ${marker}` },
+      data: { message: "我有多少封未读邮件？" },
       failOnStatusCode: false,
       timeout: 60_000
     });
@@ -725,6 +725,7 @@ test.describe("天瑞内饰智能客服回归", () => {
     await expect(page.getByRole("heading", { name: "OCR 扫描件识别" })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("button", { name: "测试 OCR" })).toBeVisible({ timeout: 30_000 });
 
+    await page.getByRole("button", { name: /高级兼容设置/ }).click();
     await expect(page.getByRole("button", { name: /LDAP \/ AD 登录/ })).toBeEnabled({ timeout: 60_000 });
     await page.getByRole("button", { name: /LDAP \/ AD 登录/ }).click();
     await expect(page.getByText("用户 DN 模板", { exact: true })).toBeVisible({ timeout: 30_000 });
@@ -850,7 +851,8 @@ test.describe("天瑞内饰智能客服回归", () => {
     await gotoWithRetry(page, "/admin/integrations");
     await page.getByRole("button", { name: /业务工具·/ }).click();
     await expect(page.getByRole("heading", { name: "已注册业务工具" })).toBeVisible();
-    await expect(page.getByText("查询本人未读邮件数量")).toBeVisible();
+    const registeredTools = page.getByRole("region", { name: "已注册业务工具" });
+    await expect(registeredTools.getByText("查询本人未读邮件数量", { exact: true })).toBeVisible();
     await expect(page.getByText("最近调用审计")).toBeVisible();
   });
 
@@ -989,7 +991,8 @@ test.describe("天瑞内饰智能客服回归", () => {
     await expect(page.getByText("ACTIVE MODE", { exact: true })).toHaveCount(0);
     await expect(page.getByText("SECURE SESSION", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "退出登录" })).toBeVisible();
-    await expect(page.getByRole("tab", { name: /全部/ })).toBeVisible({ timeout: 30_000 });
+    const allTab = page.getByRole("tab", { name: /全部/ });
+    await expect(allTab).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("tab", { name: /待处理/ })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("tab", { name: /已就绪/ })).toBeVisible({ timeout: 30_000 });
     const moreActions = page.getByRole("button", { name: "更多操作" });
@@ -1001,6 +1004,8 @@ test.describe("天瑞内饰智能客服回归", () => {
     await page.getByRole("button", { name: "更多操作" }).click();
 
     await expect(page.getByRole("heading", { name: "检查项" })).toBeVisible({ timeout: 30_000 });
+    await allTab.click();
+    await expect(allTab).toHaveAttribute("aria-selected", "true");
     const environmentGroup = page.getByRole("button", { name: /环境变量/ });
     await expect(environmentGroup).toBeVisible({ timeout: 30_000 });
     await expect(environmentGroup).toHaveAttribute("aria-expanded", "true");
@@ -1625,10 +1630,10 @@ test.describe("天瑞内饰智能客服回归", () => {
     await expect(page.getByPlaceholder("课程简介").last()).toBeVisible();
     await expect(page.getByRole("heading", { name: "正式考试与完课证书" })).toBeVisible();
     await expect(page.getByRole("button", { name: "根据讲稿生成初稿" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "提醒未完课员工" })).toBeVisible();
     await page.getByRole("button", { name: "学习跟踪" }).click();
     await expect(page.getByRole("combobox", { name: "筛选部门" })).toBeVisible();
     await expect(page.getByRole("button", { name: "导出" })).toBeEnabled();
-    await expect(page.getByRole("button", { name: "提醒未完课员工" })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
   });
 

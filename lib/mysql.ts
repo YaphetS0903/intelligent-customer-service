@@ -1,8 +1,18 @@
 import mysql from "mysql2/promise";
 import { env, hasMySqlConfig } from "@/lib/config";
 
-let pool: mysql.Pool | null = null;
-let schemaReady: Promise<void> | null = null;
+type MySqlRuntimeState = {
+  pool: mysql.Pool | null;
+  schemaReady: Promise<void> | null;
+};
+
+const globalMySql = globalThis as typeof globalThis & {
+  __tianruiMySqlRuntime?: MySqlRuntimeState;
+};
+const runtime = globalMySql.__tianruiMySqlRuntime ??= {
+  pool: null,
+  schemaReady: null
+};
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 const mysqlQueryAttempts = readPositiveInt(process.env.MYSQL_QUERY_ATTEMPTS, 2);
 const mysqlQueryTimeoutMs = readPositiveInt(process.env.MYSQL_QUERY_TIMEOUT_MS, 6000);
@@ -27,7 +37,7 @@ export function getMySqlPool() {
     return null;
   }
 
-  pool ??= mysql.createPool({
+  runtime.pool ??= mysql.createPool({
     host: env.mysqlHost,
     port: env.mysqlPort,
     database: env.mysqlDatabase,
@@ -42,7 +52,7 @@ export function getMySqlPool() {
     timezone: "Z"
   });
 
-  return pool;
+  return runtime.pool;
 }
 
 export async function ensureMySqlSchema() {
@@ -55,11 +65,11 @@ export async function ensureMySqlSchema() {
     return;
   }
 
-  schemaReady ??= createSchema(db);
+  runtime.schemaReady ??= createSchema(db);
   try {
-    await schemaReady;
+    await runtime.schemaReady;
   } catch (error) {
-    schemaReady = null;
+    runtime.schemaReady = null;
 
     if (isTransientMySqlError(error)) {
       await resetMySqlPool(db);
@@ -206,8 +216,8 @@ function queryOptions(sql: string) {
 }
 
 async function resetMySqlPool(expectedPool?: mysql.Pool) {
-  const currentPool = pool;
-  schemaReady = null;
+  const currentPool = runtime.pool;
+  runtime.schemaReady = null;
 
   if (!currentPool) {
     return;
@@ -217,7 +227,7 @@ async function resetMySqlPool(expectedPool?: mysql.Pool) {
     return;
   }
 
-  pool = null;
+  runtime.pool = null;
 
   const retireTimer = setTimeout(() => {
     void currentPool.end().catch((error) => {
