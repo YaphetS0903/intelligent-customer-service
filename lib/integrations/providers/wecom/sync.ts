@@ -7,7 +7,9 @@ import {
   startSyncRun,
   updateConnectorState,
   upsertDirectoryMember,
-  upsertUserIdentity
+  upsertUserIdentity,
+  listDirectoryMembers,
+  listUserIdentities
 } from "@/lib/integrations/store";
 import type { WecomDirectorySyncResult } from "@/lib/integrations/types";
 
@@ -17,9 +19,20 @@ export async function syncWecomDirectory(input: { startedBy: string; updateProfi
   const run = await startSyncRun("wecom", "directory.sync", input.startedBy);
   const startedAt = Date.now();
   try {
-    const [directory, localUsers] = await Promise.all([fetchWecomDirectory(), listUsers()]);
+    const [directory, localUsers, existingMembers, existingIdentities] = await Promise.all([
+      fetchWecomDirectory(),
+      listUsers(),
+      listDirectoryMembers({ connectorId: "wecom", limit: 5000 }),
+      listUserIdentities(5000)
+    ]);
     const departmentNames = new Map(directory.departments.map((item) => [item.id, item.name]));
     const localByEmail = new Map(localUsers.map((user) => [normalizeEmail(user.email), user]));
+    const localById = new Map(localUsers.map((user) => [user.id, user]));
+    const previousMemberByExternalId = new Map(existingMembers.map((member) => [member.external_user_id, member]));
+    const verifiedIdentityByExternalId = new Map(existingIdentities
+      .filter((identity) => identity.connector_id === "wecom" && identity.status === "verified")
+      .map((identity) => [identity.external_user_id, identity]));
+    const boundUserIds = new Set(verifiedIdentityByExternalId.values().map((identity) => identity.user_id));
     const externalEmailCounts = new Map<string, number>();
     for (const member of directory.users) {
       const email = normalizeEmail(member.email || member.biz_mail || "");
@@ -38,7 +51,11 @@ export async function syncWecomDirectory(input: { startedBy: string; updateProfi
       activeExternalIds.add(member.userid);
       const email = normalizeEmail(member.email || member.biz_mail || "");
       const conflict = Boolean(email && (externalEmailCounts.get(email) ?? 0) > 1);
-      const localUser = conflict ? null : localByEmail.get(email) ?? null;
+      const previousMember = previousMemberByExternalId.get(member.userid);
+      const verifiedIdentity = verifiedIdentityByExternalId.get(member.userid);
+      const identityUser = verifiedIdentity ? localById.get(verifiedIdentity.user_id) ?? null : null;
+      const emailUser = conflict || previousMember?.metadata.manual_unbound === true ? null : localByEmail.get(email) ?? null;
+      const localUser = identityUser ?? (emailUser && !boundUserIds.has(emailUser.id) ? emailUser : null);
       const active = member.enable !== 0 && member.status !== 5;
       const names = member.department.map((id) => departmentNames.get(id)).filter((name): name is string => Boolean(name));
       if (conflict) conflicts += 1;
@@ -59,11 +76,11 @@ export async function syncWecomDirectory(input: { startedBy: string; updateProfi
           external_user_id: member.userid,
           external_login: member.userid,
           external_email: email,
-          binding_source: "email",
+          binding_source: verifiedIdentity?.binding_source ?? "email",
           status: active ? "verified" : "inactive",
           verified_at: syncedAt,
           last_synced_at: syncedAt,
-          metadata: { department_ids: member.department, main_department: member.main_department ?? null }
+          metadata: { ...verifiedIdentity?.metadata, department_ids: member.department, main_department: member.main_department ?? null }
         });
       }
       await upsertDirectoryMember({
@@ -78,6 +95,7 @@ export async function syncWecomDirectory(input: { startedBy: string; updateProfi
         status: active ? "active" : "disabled",
         matched_user_id: localUser?.id ?? null,
         metadata: {
+          ...previousMember?.metadata,
           email_masked: maskEmail(email),
           alias: member.alias ?? "",
           main_department: member.main_department ?? null
@@ -124,4 +142,3 @@ function maskMobile(value: string) {
   if (normalized.length < 7) return normalized ? "***" : "";
   return `${normalized.slice(0, 3)}****${normalized.slice(-4)}`;
 }
-

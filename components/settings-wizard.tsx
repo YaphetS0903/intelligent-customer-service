@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   Bot,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   CircleAlert,
   Database,
@@ -189,7 +190,7 @@ const configGroups: ConfigGroup[] = [
   },
   {
     title: "统一身份认证",
-    description: "通过 OIDC 接入企业微信或企业统一身份平台。",
+    description: "通过标准 OIDC 接入企业统一身份平台；企业微信登录请在“业务集成”中配置。",
     fields: [
       f("SSO_PROVIDER", "登录方式"),
       f("SSO_AUTHORIZE_URL", "授权地址"),
@@ -250,12 +251,13 @@ const configGroups: ConfigGroup[] = [
   }
 ];
 
-const configSections = [
+const primaryConfigSections = [
   { title: "核心服务", groups: ["自定义对话模型", "RAG 检索模式", "自定义数据库"] },
   { title: "内容处理", groups: ["OCR 扫描件识别", "自定义语音 TTS", "数字人视频"] },
-  { title: "身份与应用", groups: ["统一身份认证", "LDAP / AD 登录", "应用参数"] },
-  { title: "可选兼容", groups: ["OpenAI", "Supabase"] }
+  { title: "应用设置", groups: ["应用参数"] }
 ];
+
+const advancedConfigGroups = ["统一身份认证", "LDAP / AD 登录", "OpenAI", "Supabase"];
 
 const groupIcons: Record<string, typeof Settings> = {
   "自定义对话模型": Bot,
@@ -405,6 +407,7 @@ export function SettingsWizard() {
   const [health, setHealth] = useState<SystemHealth | null>(null);
   const [activeView, setActiveView] = useState<"configuration" | "health">("configuration");
   const [activeGroupTitle, setActiveGroupTitle] = useState("自定义对话模型");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [healthLoading, setHealthLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -624,14 +627,21 @@ export function SettingsWizard() {
               <label htmlFor="settings-group-select" className="block">
                 <span className="mb-1.5 block text-sm font-medium text-slate-700">配置类别</span>
                 <select id="settings-group-select" value={activeGroupTitle} onChange={(event) => setActiveGroupTitle(event.target.value)} className="ui-input h-11 w-full bg-white">
-                  {configGroups.map((group) => <option key={group.title} value={group.title}>{group.title}</option>)}
+                  {primaryConfigSections.map((section) => (
+                    <optgroup key={section.title} label={section.title}>
+                      {section.groups.map((title) => <option key={title} value={title}>{title}</option>)}
+                    </optgroup>
+                  ))}
+                  <optgroup label="高级兼容设置（可选）">
+                    {advancedConfigGroups.map((title) => <option key={title} value={title}>{title}</option>)}
+                  </optgroup>
                 </select>
               </label>
             </div>
 
             <div className="grid min-w-0 md:grid-cols-[260px_minmax(0,1fr)]">
               <aside className="hidden border-r border-line bg-slate-50/70 p-3 md:block" aria-label="配置导航">
-                {configSections.map((section) => (
+                {primaryConfigSections.map((section) => (
                   <div key={section.title} className="mb-4 last:mb-0">
                     <p className="mb-1.5 px-2 text-xs font-semibold text-slate-500">{section.title}</p>
                     <div className="space-y-1">
@@ -641,6 +651,26 @@ export function SettingsWizard() {
                     </div>
                   </div>
                 ))}
+                <div className="mt-3 border-t border-line pt-3">
+                  <button
+                    type="button"
+                    onClick={() => setAdvancedOpen((open) => !open)}
+                    aria-expanded={advancedOpen}
+                    className="flex min-h-10 w-full items-center gap-2 rounded-lg px-2 text-left text-slate-600 transition hover:bg-white/80 hover:text-ink"
+                  >
+                    <SlidersHorizontal size={16} className="text-slate-400" />
+                    <span className="min-w-0 flex-1 text-sm font-semibold">高级兼容设置</span>
+                    <span className="text-xs font-normal text-slate-400">可选</span>
+                    <ChevronDown size={15} className={`text-slate-400 transition-transform ${advancedOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {advancedOpen && (
+                    <div className="mt-1 space-y-1 pl-1">
+                      {advancedConfigGroups.map((title) => (
+                        <ConfigNavButton key={title} title={title} active={activeGroupTitle === title} state={configState(title, settings)} onClick={() => setActiveGroupTitle(title)} />
+                      ))}
+                    </div>
+                  )}
+                </div>
               </aside>
 
               <div className="min-w-0 p-4 sm:p-5">

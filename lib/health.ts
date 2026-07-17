@@ -22,6 +22,7 @@ import { getOpenAIClient } from "@/lib/openai";
 import { demoUser } from "@/lib/mock-store";
 import { mysqlQuery } from "@/lib/mysql";
 import { createSupabaseAdminClient, createSupabaseServerClient } from "@/lib/supabase/server";
+import { getWecomConfig } from "@/lib/integrations/config";
 import type { WorkflowReadinessStats } from "@/lib/types";
 import type { UserProfile } from "@/lib/types";
 
@@ -576,7 +577,9 @@ function emptyWorkflowReadinessStats(): WorkflowReadinessStats {
 
 export async function getSystemHealth(): Promise<SystemHealth> {
   const user = await getSettingsUserSnapshot();
-  const hasUnifiedIdentityConfig = hasSsoConfig() || hasLdapConfig();
+  const wecomConfig = getWecomConfig();
+  const hasWecomSsoConfig = isMySqlDatabase() && wecomConfig.enabled && wecomConfig.ssoEnabled && wecomConfig.configured && Boolean(wecomConfig.agentId);
+  const hasUnifiedIdentityConfig = hasWecomSsoConfig || hasSsoConfig() || hasLdapConfig();
   const checks: HealthCheck[] = [
     {
       id: "database-provider",
@@ -642,7 +645,11 @@ export async function getSystemHealth(): Promise<SystemHealth> {
       group: "user",
       name: "企业统一登录",
       status: hasUnifiedIdentityConfig ? "ready" : "warning",
-      detail: hasSsoConfig()
+      detail: hasWecomSsoConfig
+        ? getWecomConfig().autoProvisionUsers
+          ? "已启用企业微信单点登录和首次登录自动开户。在职成员首次登录时会创建普通员工账号并绑定 userid。"
+          : "已启用企业微信单点登录。员工通过已验证的 userid 映射登录，未绑定成员需要管理员处理。"
+        : hasSsoConfig()
         ? "已配置 OIDC 统一登录。登录页会显示企业统一登录入口，首次登录员工会自动建号。"
         : hasLdapConfig()
           ? "已配置 LDAP / AD 直连登录。员工可通过企业目录账号登录。"
@@ -657,15 +664,15 @@ export async function getSystemHealth(): Promise<SystemHealth> {
       id: "ldap-provider",
       group: "user",
       name: "LDAP / AD 登录",
-      status: hasLdapConfig() ? "ready" : hasSsoConfig() ? "ready" : "warning",
+      status: hasLdapConfig() ? "ready" : hasWecomSsoConfig || hasSsoConfig() ? "ready" : "warning",
       detail: env.ldapProvider === "custom"
         ? hasSsoConfig()
           ? "OIDC 已覆盖统一身份入口；如还需要直连 LDAP / AD，可继续补充 LDAP 配置。"
           : hasLdapConfig()
             ? "已配置 LDAP / AD 直连登录。系统内账号密码失败后，会尝试使用企业目录校验员工身份并自动同步基础资料。"
             : "LDAP_PROVIDER 为 custom 时，需要填写 LDAP_URL，并配置服务账号搜索方式或用户 DN 模板。"
-        : hasSsoConfig()
-          ? "OIDC 已覆盖统一身份入口；当前未额外启用 LDAP / AD 直连。"
+        : hasWecomSsoConfig || hasSsoConfig()
+          ? "企业统一登录已覆盖身份入口；当前未额外启用 LDAP / AD 直连。"
           : "未启用 LDAP / AD 直连登录，当前使用系统内账号密码。",
       action: !hasUnifiedIdentityConfig
         ? { label: "配置 LDAP", href: "/admin/settings#setup" }

@@ -602,6 +602,26 @@ NOTIFICATION_WECOM_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?
 
 未配置这些地址时只发送站内通知，不影响审批、工单和安全审计主流程。
 
+企业微信自建应用还支持按员工身份精准发送应用消息。先在“业务集成”同步通讯录，以员工邮箱精确建立系统账号与企业微信 `userid` 的已验证映射，再配置并启用：
+
+```bash
+WECOM_ENABLED=true
+WECOM_SSO_ENABLED=true
+WECOM_NOTIFICATION_ENABLED=true
+WECOM_CORP_ID=企业ID
+WECOM_CORP_SECRET=自建应用Secret
+WECOM_AGENT_ID=自建应用AgentID
+WECOM_AUTO_PROVISION_USERS=true
+```
+
+启用 `WECOM_SSO_ENABLED` 后，登录页会显示独立的“企业微信登录”入口。桌面浏览器跳转企业微信新版扫码登录页；从企业微信工作台进入时，系统先静默确认员工身份，再通过官方 `openDefaultBrowser` 接口把 OAuth2 登录地址交给系统默认浏览器，实现免扫码登录。接力页为 `/wecom/open`，默认浏览器回调为 `/api/auth/wecom/external/callback`；客户端无法调用默认浏览器时，页面会保留重试和继续在企业微信内使用两个入口。
+
+启用 `WECOM_AUTO_PROVISION_USERS` 后，已同步通讯录中的在职成员首次登录会自动创建无本地密码的普通员工账号并绑定 `userid`；管理员账号仍必须手工确认绑定。关闭该开关时，企业微信登录只接受“业务集成”中已有的已验证映射。两种模式都不会按姓名猜测账号。应用后台的 OAuth 可信域名、Web 网页授权回调域名和 JS-SDK 可信域名应配置为与 `APP_BASE_URL` 完全一致的主机和端口，例如 `mail.trqcns.com:4009`。正式环境应尽快启用 HTTPS，避免 OAuth2 临时授权参数在明文链路上传输。
+
+应用消息仅投递给已验证映射的账号；没有映射时会记录为“已跳过”，不会按姓名、手机号或相似邮箱猜测接收人。管理员可在 `/admin/integrations` 选择已匹配账号发送测试消息，并查看企业微信与 Winmail 的统一投递记录。
+
+“通讯录”视图默认只展示待匹配成员，支持按姓名、邮箱、部门和岗位搜索。管理员可以手动选择系统账号完成绑定，也可以解除已有绑定；同一企业微信成员和同一系统账号都只能存在一个有效绑定。手动绑定优先于邮箱自动匹配，手动解绑后后续通讯录同步不会立即按邮箱重新绑回。测试消息默认不选择接收人，发送前会再次显示姓名和邮箱确认，避免误发。
+
 ## 资料审批发布
 
 管理员上传资料后，系统会先解析文件并生成知识分片，但新资料默认保持“草稿”状态。管理员可在 `/admin/documents` 的资料列表中打开“权限治理”，完成以下流程：

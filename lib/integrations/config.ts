@@ -7,12 +7,15 @@ const envPath = path.join(process.cwd(), ".env.local");
 const providerKeys = {
   wecom: [
     "WECOM_ENABLED",
+    "WECOM_SSO_ENABLED",
+    "WECOM_NOTIFICATION_ENABLED",
     "WECOM_CORP_ID",
     "WECOM_CORP_SECRET",
     "WECOM_AGENT_ID",
     "WECOM_API_BASE_URL",
     "WECOM_ROOT_DEPARTMENT_ID",
-    "WECOM_SYNC_PROFILE_FIELDS"
+    "WECOM_SYNC_PROFILE_FIELDS",
+    "WECOM_AUTO_PROVISION_USERS"
   ],
   winmail: [
     "WINMAIL_ENABLED",
@@ -49,13 +52,17 @@ export function getWecomConfig() {
   const agentId = process.env.WECOM_AGENT_ID?.trim() ?? "";
   return {
     enabled: process.env.WECOM_ENABLED === "true",
+    ssoEnabled: process.env.WECOM_SSO_ENABLED === "true",
+    notificationEnabled: process.env.WECOM_NOTIFICATION_ENABLED === "true",
     configured: Boolean(corpId && corpSecret),
+    notificationConfigured: Boolean(corpId && corpSecret && agentId),
     corpId,
     corpSecret,
     agentId,
     baseUrl,
     rootDepartmentId: positiveInt(process.env.WECOM_ROOT_DEPARTMENT_ID, 1),
-    syncProfileFields: process.env.WECOM_SYNC_PROFILE_FIELDS === "true"
+    syncProfileFields: process.env.WECOM_SYNC_PROFILE_FIELDS === "true",
+    autoProvisionUsers: process.env.WECOM_AUTO_PROVISION_USERS === "true"
   };
 }
 
@@ -86,13 +93,17 @@ export function getPublicIntegrationConfigs() {
   return {
     wecom: {
       enabled: wecom.enabled,
+      sso_enabled: wecom.ssoEnabled,
+      notification_enabled: wecom.notificationEnabled,
       configured: wecom.configured,
+      notification_configured: wecom.notificationConfigured,
       corp_id_masked: maskValue(wecom.corpId),
       corp_secret_configured: Boolean(wecom.corpSecret),
       agent_id: wecom.agentId,
       api_base_url: wecom.baseUrl,
       root_department_id: wecom.rootDepartmentId,
-      sync_profile_fields: wecom.syncProfileFields
+      sync_profile_fields: wecom.syncProfileFields,
+      auto_provision_users: wecom.autoProvisionUsers
     },
     winmail: {
       enabled: winmail.enabled,
@@ -144,10 +155,10 @@ export async function saveIntegrationConfig(provider: IntegrationProvider, input
 }
 
 function validateSetting(key: string, value: string) {
-  if (["WECOM_ENABLED", "WECOM_SYNC_PROFILE_FIELDS", "WINMAIL_ENABLED", "WINMAIL_NOTIFICATION_ENABLED", "WINMAIL_ALLOW_INSECURE_HTTP"].includes(key)) {
+  if (["WECOM_ENABLED", "WECOM_SSO_ENABLED", "WECOM_NOTIFICATION_ENABLED", "WECOM_SYNC_PROFILE_FIELDS", "WECOM_AUTO_PROVISION_USERS", "WINMAIL_ENABLED", "WINMAIL_NOTIFICATION_ENABLED", "WINMAIL_ALLOW_INSECURE_HTTP"].includes(key)) {
     if (!["true", "false"].includes(value)) throw new Error(`${key} 只能为 true 或 false`);
   }
-  if (["WECOM_ROOT_DEPARTMENT_ID", "WINMAIL_TIMEOUT_MS"].includes(key) && (!/^\d+$/.test(value) || Number(value) <= 0)) {
+  if (["WECOM_AGENT_ID", "WECOM_ROOT_DEPARTMENT_ID", "WINMAIL_TIMEOUT_MS"].includes(key) && value && (!/^\d+$/.test(value) || Number(value) <= 0)) {
     throw new Error(`${key} 必须为正整数`);
   }
   if (["WECOM_API_BASE_URL", "WINMAIL_API_URL"].includes(key) && value) {

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Building2, Loader2, LogIn, UserPlus } from "lucide-react";
+import { Building2, Loader2, LogIn, MessageSquare, UserPlus } from "lucide-react";
 import { safePostLoginPath } from "@/lib/safe-navigation";
 
 type Mode = "login" | "signup";
@@ -16,7 +16,8 @@ export function AuthPanel() {
   const [name, setName] = useState("");
   const [department, setDepartment] = useState("");
   const [loading, setLoading] = useState(false);
-  const [ssoEnabled, setSsoEnabled] = useState(false);
+  const [oidcEnabled, setOidcEnabled] = useState(false);
+  const [wecomEnabled, setWecomEnabled] = useState(false);
   const [selfRegistrationEnabled, setSelfRegistrationEnabled] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -29,11 +30,13 @@ export function AuthPanel() {
     void fetch("/api/auth/sso/status", { cache: "no-store" })
       .then((response) => response.json())
       .then((data) => {
-        setSsoEnabled(Boolean(data.enabled));
+        setOidcEnabled(Boolean(data.oidcEnabled ?? data.enabled));
+        setWecomEnabled(Boolean(data.wecomEnabled));
         setSelfRegistrationEnabled(Boolean(data.selfRegistrationEnabled));
       })
       .catch(() => {
-        setSsoEnabled(false);
+        setOidcEnabled(false);
+        setWecomEnabled(false);
         setSelfRegistrationEnabled(false);
       });
   }, [searchParams]);
@@ -82,6 +85,11 @@ export function AuthPanel() {
   function startSsoLogin() {
     const next = searchParams.get("next") || "/";
     window.location.href = `/api/auth/sso/start?next=${encodeURIComponent(next)}`;
+  }
+
+  function startWecomLogin() {
+    const next = searchParams.get("next") || "/";
+    window.location.href = `/api/auth/wecom/start?next=${encodeURIComponent(next)}`;
   }
 
   return (
@@ -169,14 +177,33 @@ export function AuthPanel() {
         {mode === "login" ? "登录" : "注册"}
       </button>
 
-      {mode === "login" && (
+      {mode === "login" && wecomEnabled && (
+        <>
+          <div className="my-4 flex items-center gap-3 text-xs text-slate-400">
+            <span className="h-px flex-1 bg-line" />
+            <span>企业员工快捷登录</span>
+            <span className="h-px flex-1 bg-line" />
+          </div>
+          <button
+            type="button"
+            onClick={startWecomLogin}
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#07c160] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#06ad56] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#07c160]/30"
+          >
+            <MessageSquare size={17} />
+            企业微信登录
+          </button>
+          <p className="mt-2 text-center text-xs text-slate-500">电脑端扫码，企业微信内自动授权</p>
+        </>
+      )}
+
+      {mode === "login" && oidcEnabled && (
         <button
+          type="button"
           onClick={startSsoLogin}
-          disabled={!ssoEnabled}
           className="ui-button-secondary mt-3 h-11 w-full"
         >
           <Building2 size={17} />
-          企业统一登录
+          其他统一登录
         </button>
       )}
 

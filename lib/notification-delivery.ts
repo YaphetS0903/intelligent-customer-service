@@ -1,15 +1,17 @@
 import { env } from "@/lib/config";
-import { getWinmailConfig } from "@/lib/integrations/config";
+import { getWecomConfig, getWinmailConfig } from "@/lib/integrations/config";
+import { deliverWecomAppMessage } from "@/lib/integrations/providers/wecom/delivery";
 import { deliverWinmailEmail } from "@/lib/integrations/providers/winmail/delivery";
 import type { AppNotification } from "@/lib/types";
 
-export type NotificationDeliveryChannel = "webhook" | "email_webhook" | "wecom_webhook" | "winmail";
+export type NotificationDeliveryChannel = "webhook" | "email_webhook" | "wecom_webhook" | "winmail" | "wecom";
 
 export function configuredNotificationChannels(): NotificationDeliveryChannel[] {
   return [
     env.notificationWebhookUrl ? "webhook" : null,
     env.notificationEmailWebhookUrl ? "email_webhook" : null,
     env.notificationWecomWebhookUrl ? "wecom_webhook" : null,
+    getWecomConfig().enabled && getWecomConfig().notificationEnabled && getWecomConfig().notificationConfigured ? "wecom" : null,
     getWinmailConfig().enabled && getWinmailConfig().notificationEnabled ? "winmail" : null
   ].filter((channel): channel is NotificationDeliveryChannel => Boolean(channel));
 }
@@ -47,6 +49,18 @@ export async function deliverNotificationExternally(notification: AppNotificatio
       text: `${notification.body}${notification.href ? `\n\n查看详情：${absoluteHref(notification.href)}` : ""}`,
       metadata: { source_type: notification.source_type, source_id: notification.source_id }
     }).then((result) => ({ channel: "winmail" as const, ok: result.ok, error: result.error })));
+  }
+  const wecom = getWecomConfig();
+  if (wecom.enabled && wecom.notificationEnabled && wecom.notificationConfigured) {
+    tasks.push(deliverWecomAppMessage({
+      notificationId: notification.id,
+      dedupeKey: notification.dedupe_key,
+      recipientUserId: notification.user_id,
+      title: notification.title,
+      text: notification.body,
+      href: notification.href,
+      metadata: { source_type: notification.source_type, source_id: notification.source_id }
+    }).then((result) => ({ channel: "wecom" as const, ok: result.ok, error: result.error })));
   }
 
   return Promise.all(tasks);

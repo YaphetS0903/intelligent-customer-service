@@ -43,7 +43,7 @@ export type IntegrationUserIdentity = {
   external_user_id: string;
   external_login: string;
   external_email: string;
-  binding_source: "email" | "manual" | "sync";
+  binding_source: "email" | "manual" | "sync" | "jit";
   status: "verified" | "conflict" | "inactive";
   verified_at: string | null;
   last_synced_at: string | null;
@@ -95,4 +95,3 @@ export type WecomDirectorySyncResult = {
   conflicts: number;
   run: IntegrationSyncRun;
 };
-

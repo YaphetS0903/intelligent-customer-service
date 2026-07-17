@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import {
   Activity,
@@ -18,6 +19,7 @@ import { Shell } from "@/components/shell";
 import { StatusPill } from "@/components/status-pill";
 import { getCurrentUserOrNull } from "@/lib/db";
 import { getDashboardStats } from "@/lib/dashboard";
+import { isWecomClient } from "@/lib/wecom-sso";
 
 const actions = [
   {
@@ -46,7 +48,11 @@ const actions = [
   }
 ];
 
-export default async function HomePage() {
+export default async function HomePage({ searchParams }: { searchParams: Promise<{ embedded?: string }> }) {
+  const [{ embedded }, headerStore] = await Promise.all([searchParams, headers()]);
+  if (embedded !== "1" && isWecomClient(headerStore.get("user-agent"))) {
+    redirect("/wecom/open");
+  }
   const user = await getCurrentUserOrNull();
 
   if (user?.role !== "admin") {

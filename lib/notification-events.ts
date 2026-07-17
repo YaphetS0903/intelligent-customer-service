@@ -31,7 +31,7 @@ export async function notifyUsers(userIds: Array<string | null | undefined>, pay
       `notification:${payload.dedupe_key ?? payload.source_id}:${userId}`
     );
     if (externalChannels.length > 0) {
-      const recipient = externalChannels.includes("winmail") ? await getUserProfile(userId) : null;
+      const recipient = externalChannels.includes("winmail") || externalChannels.includes("wecom") ? await getUserProfile(userId) : null;
       const delivery = await deliverNotificationExternally(notification, recipient ?? undefined);
       const failures = delivery.filter((item) => !item.ok);
       if (failures.length > 0) {

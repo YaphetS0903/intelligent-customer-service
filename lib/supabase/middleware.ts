@@ -16,12 +16,19 @@ export async function updateSession(request: NextRequest) {
       (pathname === "/" ||
         pathname.startsWith("/chat") ||
         pathname.startsWith("/admin") ||
-        pathname.startsWith("/training"));
+        pathname.startsWith("/training") ||
+        pathname.startsWith("/wecom"));
     const authPath = pathname.startsWith("/login");
     const session = await verifySessionToken(request.cookies.get(sessionCookieName)?.value);
 
     if (protectedPath && !session) {
       const url = request.nextUrl.clone();
+      if (isWecomClientRequest(request) && hasWecomSsoRuntimeConfig()) {
+        url.pathname = "/api/auth/wecom/start";
+        url.search = "";
+        url.searchParams.set("next", pathname === "/" ? "/wecom/open" : pathname);
+        return NextResponse.redirect(url);
+      }
       url.pathname = "/login";
       url.searchParams.set("next", pathname);
       return NextResponse.redirect(url);
@@ -79,4 +86,19 @@ export async function updateSession(request: NextRequest) {
   }
 
   return response;
+}
+
+function isWecomClientRequest(request: NextRequest) {
+  return /wxwork/i.test(request.headers.get("user-agent") ?? "");
+}
+
+function hasWecomSsoRuntimeConfig() {
+  return (
+    process.env.DATABASE_PROVIDER === "mysql" &&
+    process.env.WECOM_ENABLED === "true" &&
+    process.env.WECOM_SSO_ENABLED === "true" &&
+    Boolean(process.env.WECOM_CORP_ID?.trim()) &&
+    Boolean(process.env.WECOM_CORP_SECRET?.trim()) &&
+    Boolean(process.env.WECOM_AGENT_ID?.trim())
+  );
 }

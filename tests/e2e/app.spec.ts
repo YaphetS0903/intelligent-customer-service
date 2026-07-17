@@ -770,16 +770,23 @@ test.describe("天瑞内饰智能客服回归", () => {
     await gotoWithRetry(page, "/admin/integrations");
     await expect(page.getByRole("heading", { name: "业务集成" })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("button", { name: "连接器" })).toBeVisible();
-    const wecomPanel = page.locator("article").filter({ hasText: "企业微信通讯录" });
+    const wecomPanel = page.locator("article").filter({ hasText: "企业微信通讯录与通知" });
     await expect(wecomPanel).toHaveCount(1);
     await wecomPanel.locator("summary").click();
     await expect(wecomPanel.getByText("CorpSecret", { exact: true })).toBeVisible();
+    await expect(wecomPanel.getByText("启用应用消息通知", { exact: true })).toBeVisible();
     await expect(wecomPanel.getByRole("button", { name: "同步企业微信通讯录" })).toBeVisible();
+    await expect(wecomPanel.getByRole("button", { name: "发送测试消息" })).toBeVisible();
+    await expect(wecomPanel.getByLabel("测试接收账号")).toHaveValue("");
+    await expect(wecomPanel.getByRole("button", { name: "发送测试消息" })).toBeDisabled();
     const winmailPanel = page.locator("article").filter({ hasText: "Winmail 邮件通知" });
     await expect(winmailPanel).toHaveCount(1);
     await winmailPanel.locator("summary").click();
     await expect(winmailPanel.getByText("ApiSecret", { exact: true })).toBeVisible();
     await expect(winmailPanel.getByRole("button", { name: "发送测试邮件" })).toBeVisible();
+    await page.getByRole("button", { name: /通讯录·/ }).click();
+    await expect(page.getByRole("button", { name: /待匹配/ })).toBeVisible();
+    await expect(page.getByPlaceholder("搜索姓名、邮箱、部门或岗位")).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBeTruthy();
 
     await page.setViewportSize({ width: 390, height: 844 });
@@ -1099,7 +1106,12 @@ test.describe("天瑞内饰智能客服回归", () => {
     const ssoResponse = await page.request.get("/api/auth/sso/status");
     expect(ssoResponse.ok()).toBeTruthy();
     const sso = await ssoResponse.json();
-    expect(sso).toEqual(expect.objectContaining({ enabled: expect.any(Boolean), provider: expect.any(String) }));
+    expect(sso).toEqual(expect.objectContaining({
+      enabled: expect.any(Boolean),
+      oidcEnabled: expect.any(Boolean),
+      wecomEnabled: expect.any(Boolean),
+      provider: expect.any(String)
+    }));
 
     const insightsResponse = await page.request.get("/api/admin/insights");
     expect(insightsResponse.ok()).toBeTruthy();

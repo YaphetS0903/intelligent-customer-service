@@ -40,6 +40,10 @@ export async function getIntegrationDashboard() {
       unmatched: members.filter((member) => member.status === "active" && !member.matched_user_id).length
     },
     identities: identities.map((identity) => ({ ...identity, local_user: userMap.get(identity.user_id) ?? null })),
+    users: users
+      .filter((user) => user.status === "active")
+      .map((user) => ({ id: user.id, name: user.name, email: user.email, department: user.department, position: user.position }))
+      .sort((left, right) => left.name.localeCompare(right.name, "zh-CN")),
     sync_runs: syncRuns,
     delivery_logs: deliveryLogs
   };
@@ -92,4 +96,3 @@ async function syncConnectorConfig(provider: IntegrationProvider, enabled: boole
   const health = !configured ? "unconfigured" : !enabled ? "disabled" : current?.health_status === "healthy" || current?.health_status === "error" ? current.health_status : "degraded";
   return updateConnectorState(provider, { enabled, health_status: health, public_config: publicConfig });
 }
-

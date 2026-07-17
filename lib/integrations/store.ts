@@ -236,6 +236,28 @@ export async function listDirectoryMembers(options: { connectorId?: IntegrationP
   return [...memory.members.values()].filter((item) => !options.connectorId || item.connector_id === options.connectorId).slice(0, limit);
 }
 
+export async function findDirectoryMemberByExternalId(connectorId: IntegrationProvider, externalUserId: string) {
+  if (isMySqlDatabase()) {
+    const rows = await mysqlQuery<Row[]>(
+      "select * from integration_directory_members where connector_id=:connectorId and external_user_id=:externalUserId limit 1",
+      { connectorId, externalUserId }
+    );
+    return rows[0] ? directoryMemberFromRow(rows[0]) : null;
+  }
+  const supabase = createSupabaseAdminClient();
+  if (supabase && hasSupabaseAdminConfig()) {
+    const { data, error } = await supabase
+      .from("integration_directory_members")
+      .select("*")
+      .eq("connector_id", connectorId)
+      .eq("external_user_id", externalUserId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return data ? directoryMemberFromRow(data) : null;
+  }
+  return memory.members.get(`${connectorId}:${externalUserId}`) ?? null;
+}
+
 export async function listUserIdentities(limit = 1000) {
   const safeLimit = Math.min(Math.max(limit, 1), 5000);
   if (isMySqlDatabase()) {
@@ -248,6 +270,65 @@ export async function listUserIdentities(limit = 1000) {
     return (data ?? []).map(identityFromRow);
   }
   return [...memory.identities.values()].slice(0, safeLimit);
+}
+
+export async function deleteUserIdentity(connectorId: IntegrationProvider, userId: string) {
+  if (isMySqlDatabase()) {
+    await mysqlExecute(
+      "delete from integration_user_identities where connector_id=:connectorId and user_id=:userId",
+      { connectorId, userId }
+    );
+    return;
+  }
+  const supabase = createSupabaseAdminClient();
+  if (supabase && hasSupabaseAdminConfig()) {
+    const { error } = await supabase.from("integration_user_identities").delete().eq("connector_id", connectorId).eq("user_id", userId);
+    if (error) throw new Error(error.message);
+    return;
+  }
+  memory.identities.delete(`${connectorId}:${userId}`);
+}
+
+export async function findVerifiedUserIdentity(connectorId: IntegrationProvider, userId: string) {
+  if (isMySqlDatabase()) {
+    const rows = await mysqlQuery<Row[]>(
+      "select * from integration_user_identities where connector_id=:connectorId and user_id=:userId and status='verified' limit 1",
+      { connectorId, userId }
+    );
+    return rows[0] ? identityFromRow(rows[0]) : null;
+  }
+  const supabase = createSupabaseAdminClient();
+  if (supabase && hasSupabaseAdminConfig()) {
+    const { data, error } = await supabase.from("integration_user_identities").select("*").eq("connector_id", connectorId).eq("user_id", userId).eq("status", "verified").maybeSingle();
+    if (error) throw new Error(error.message);
+    return data ? identityFromRow(data) : null;
+  }
+  return memory.identities.get(`${connectorId}:${userId}`)?.status === "verified" ? memory.identities.get(`${connectorId}:${userId}`) ?? null : null;
+}
+
+export async function findVerifiedUserIdentityByExternalId(connectorId: IntegrationProvider, externalUserId: string) {
+  if (isMySqlDatabase()) {
+    const rows = await mysqlQuery<Row[]>(
+      "select * from integration_user_identities where connector_id=:connectorId and external_user_id=:externalUserId and status='verified' limit 1",
+      { connectorId, externalUserId }
+    );
+    return rows[0] ? identityFromRow(rows[0]) : null;
+  }
+  const supabase = createSupabaseAdminClient();
+  if (supabase && hasSupabaseAdminConfig()) {
+    const { data, error } = await supabase
+      .from("integration_user_identities")
+      .select("*")
+      .eq("connector_id", connectorId)
+      .eq("external_user_id", externalUserId)
+      .eq("status", "verified")
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return data ? identityFromRow(data) : null;
+  }
+  return [...memory.identities.values()].find(
+    (item) => item.connector_id === connectorId && item.external_user_id === externalUserId && item.status === "verified"
+  ) ?? null;
 }
 
 export async function listSyncRuns(limit = 50) {
