@@ -11,6 +11,8 @@ import {
   updateConnectorState
 } from "@/lib/integrations/store";
 import type { IntegrationProvider } from "@/lib/integrations/types";
+import { listRegisteredTools } from "@/lib/integrations/tool-registry";
+import { listToolExecutions } from "@/lib/integrations/tool-store";
 
 export async function getIntegrationDashboard() {
   const configs = getPublicIntegrationConfigs();
@@ -20,13 +22,15 @@ export async function getIntegrationDashboard() {
     syncConnectorConfig("wecom", wecom.enabled, wecom.configured, configs.wecom),
     syncConnectorConfig("winmail", winmail.enabled, winmail.configured, configs.winmail)
   ]);
-  const [connectors, members, identities, syncRuns, deliveryLogs, users] = await Promise.all([
+  const [connectors, members, identities, syncRuns, deliveryLogs, users, tools, toolExecutions] = await Promise.all([
     listIntegrationConnectors(),
     listDirectoryMembers({ connectorId: "wecom", limit: 1000 }),
     listUserIdentities(1000),
     listSyncRuns(50),
     listDeliveryLogs(100),
-    listUsers()
+    listUsers(),
+    listRegisteredTools(),
+    listToolExecutions(100)
   ]);
   const userMap = new Map(users.map((user) => [user.id, { id: user.id, name: user.name, email: user.email, department: user.department, position: user.position }]));
   return {
@@ -45,7 +49,9 @@ export async function getIntegrationDashboard() {
       .map((user) => ({ id: user.id, name: user.name, email: user.email, department: user.department, position: user.position }))
       .sort((left, right) => left.name.localeCompare(right.name, "zh-CN")),
     sync_runs: syncRuns,
-    delivery_logs: deliveryLogs
+    delivery_logs: deliveryLogs,
+    tools,
+    tool_executions: toolExecutions
   };
 }
 

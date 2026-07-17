@@ -32,6 +32,9 @@ const requiredTables = [
   "integration_user_identities",
   "integration_sync_runs",
   "integration_delivery_logs",
+  "integration_tools",
+  "integration_tool_executions",
+  "integration_user_credentials",
   "training_jobs",
   "training_video_jobs",
   "training_progress",
@@ -48,6 +51,7 @@ const requiredTables = [
 
 const config = {
   authSecret: readConfig("AUTH_SECRET"),
+  integrationCredentialEncryptionKey: readConfig("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY"),
   appBaseUrl: readConfig("APP_BASE_URL"),
   runtimeBaseUrl: readConfig("RUNTIME_MONITOR_BASE_URL") || readConfig("APP_BASE_URL"),
   databaseProvider: readConfig("DATABASE_PROVIDER"),
@@ -98,6 +102,9 @@ async function checkProductionConfig() {
   const errors = [];
   if (config.authSecret.length < 32 || /change|replace|example|placeholder/i.test(config.authSecret)) {
     errors.push("AUTH_SECRET 未设置为至少 32 位的生产密钥");
+  }
+  if (config.integrationCredentialEncryptionKey.length < 32 || /change|replace|example|placeholder/i.test(config.integrationCredentialEncryptionKey)) {
+    errors.push("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY 未设置为至少 32 位的生产密钥");
   }
   try {
     const url = new URL(config.appBaseUrl);

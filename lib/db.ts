@@ -2161,6 +2161,7 @@ export async function createMessage(input: Omit<Message, "id" | "created_at">): 
   const record: Message = {
     id: createId("msg"),
     created_at: new Date().toISOString(),
+    metadata: {},
     ...input
   };
 

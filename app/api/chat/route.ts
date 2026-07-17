@@ -30,6 +30,8 @@ import {
   buildAbnormalAccessEvent,
   buildSecurityEvent
 } from "@/lib/security-audit";
+import { executeChatBusinessTool } from "@/lib/integrations/chat-tool-intent";
+import { linkToolExecutionMessage } from "@/lib/integrations/tool-store";
 
 function noSearchableAnswer(input: { accessibleCount: number; selectedCount: number }) {
   if (input.accessibleCount === 0) {
@@ -126,6 +128,20 @@ export async function POST(request: Request) {
         message_id: userMessage.id
       }).catch(() => null);
       return NextResponse.json({ error: "所选资料范围不可访问" }, { status: 403 });
+    }
+
+    const businessTool = await executeChatBusinessTool({ question, user, conversationId: conversation.id });
+    if (businessTool) {
+      const assistantMessage = await createMessage({
+        conversation_id: conversation.id,
+        role: "assistant",
+        content: businessTool.content,
+        citations: [],
+        model: null,
+        metadata: businessTool.metadata
+      });
+      if (businessTool.execution_id) await linkToolExecutionMessage(businessTool.execution_id, assistantMessage.id).catch(() => undefined);
+      return NextResponse.json({ conversation, messages: [userMessage, assistantMessage], knowledge_task_id: null });
     }
 
     const documents = (await listDocuments()).filter((document) => canAccessDocument(user, document));

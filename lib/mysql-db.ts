@@ -328,6 +328,7 @@ function messageFromRow(row: Row): Message {
     content: row.content,
     citations: parseJson<Message["citations"]>(row.citations, []),
     model: row.model,
+    metadata: parseJson<Record<string, unknown>>(row.metadata, {}),
     created_at: toIsoString(row.created_at)
   };
 }
@@ -2104,14 +2105,16 @@ export async function createMessage(input: Omit<Message, "id" | "created_at">) {
   const record: Message = {
     id: createId("msg"),
     created_at: new Date().toISOString(),
+    metadata: {},
     ...input
   };
   await mysqlExecute(
-    `insert into messages (id, conversation_id, role, content, citations, model, created_at)
-      values (:id, :conversation_id, :role, :content, :citations, :model, :created_at)`,
+    `insert into messages (id, conversation_id, role, content, citations, model, metadata, created_at)
+      values (:id, :conversation_id, :role, :content, :citations, :model, :metadata, :created_at)`,
     {
       ...record,
-      citations: JSON.stringify(record.citations)
+      citations: JSON.stringify(record.citations),
+      metadata: JSON.stringify(record.metadata ?? {})
     }
   );
   return record;

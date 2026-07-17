@@ -36,6 +36,8 @@ import {
   maskSensitiveText
 } from "@/lib/security-audit";
 import type { Citation } from "@/lib/types";
+import { executeChatBusinessTool } from "@/lib/integrations/chat-tool-intent";
+import { linkToolExecutionMessage } from "@/lib/integrations/tool-store";
 
 type StreamEvent =
   | {
@@ -52,6 +54,7 @@ type StreamEvent =
   | { type: "heartbeat"; at: string }
   | { type: "delta"; text: string }
   | { type: "citations"; citations: Citation[] }
+  | { type: "tool_result"; metadata: Record<string, unknown> }
   | { type: "done"; message_id: string; citations: Citation[]; model: string | null; knowledge_task_id?: string | null }
   | { type: "error"; error: string };
 
@@ -281,6 +284,24 @@ export async function POST(request: Request) {
           user_message_id: userMessage.id,
           knowledge_bases: searchScopes
         });
+
+        const businessTool = await executeChatBusinessTool({ question, user, conversationId: conversation.id });
+        if (businessTool) {
+          send({ type: "delta", text: businessTool.content });
+          send({ type: "tool_result", metadata: businessTool.metadata });
+          const assistantMessage = await createMessage({
+            conversation_id: conversation.id,
+            role: "assistant",
+            content: businessTool.content,
+            citations: [],
+            model: null,
+            metadata: businessTool.metadata
+          });
+          if (businessTool.execution_id) await linkToolExecutionMessage(businessTool.execution_id, assistantMessage.id).catch(() => undefined);
+          send({ type: "done", message_id: assistantMessage.id, citations: [], model: null });
+          close();
+          return;
+        }
 
         const history = (await listMessages(conversation.id))
           .filter((message) => message.id !== userMessage.id)

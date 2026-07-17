@@ -22,6 +22,7 @@ jobs:
       MYSQL_QUERY_TIMEOUT_MS: 10000
       MYSQL_CONNECT_TIMEOUT_MS: 8000
       AUTH_SECRET: ci-auth-secret-for-enterprise-ai-support-2026
+      INTEGRATION_CREDENTIAL_ENCRYPTION_KEY: ci-integration-credential-encryption-key-2026
       INITIAL_ADMIN_EMAIL: admin@e2e.local
       INITIAL_ADMIN_PASSWORD: ci-only-admin-password
       E2E_TEST_PASSWORD: ci-only-test-password

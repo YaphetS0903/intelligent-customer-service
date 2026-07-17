@@ -15,6 +15,7 @@ import {
   ExternalLink,
   History,
   Loader2,
+  Mail,
   MessageSquare,
   MoreHorizontal,
   PencilLine,
@@ -47,6 +48,7 @@ type ChatStreamEvent =
   | { type: "heartbeat"; at: string }
   | { type: "delta"; text: string }
   | { type: "citations"; citations: Citation[] }
+  | { type: "tool_result"; metadata: Record<string, unknown> }
   | { type: "done"; message_id: string; citations: Citation[]; model: string | null; knowledge_task_id?: string | null }
   | { type: "error"; error: string };
 
@@ -54,8 +56,13 @@ type FeedbackRating = "like" | "dislike";
 type ConversationView = "recent" | "archived";
 type FeedbackDraft = { messageId: string; rating: FeedbackRating; reason: string; comment: string };
 type TicketDraft = { messageId: string; comment: string };
+type WinmailBinding = { bound: boolean; email_masked: string; verified_at: string | null; encryption_ready: boolean };
 
 const quickPromptGroups = [
+  {
+    title: "办公助手",
+    prompts: ["我有多少封未读邮件？", "查一下最近 5 封邮件", "查找今天的未读邮件"]
+  },
   {
     title: "入职与培训",
     prompts: ["新员工入职流程是什么？", "试用期员工需要完成哪些培训？", "公司培训资料里有哪些重点？"]
@@ -113,6 +120,12 @@ export function ChatClient() {
   const [ticketCommentDraft, setTicketCommentDraft] = useState<Record<string, string>>({});
   const [ticketCommentSavingId, setTicketCommentSavingId] = useState<string | null>(null);
   const [ticketsExpanded, setTicketsExpanded] = useState(false);
+  const [winmailBinding, setWinmailBinding] = useState<WinmailBinding | null>(null);
+  const [mailboxDialogOpen, setMailboxDialogOpen] = useState(false);
+  const [mailboxEmail, setMailboxEmail] = useState("");
+  const [mailboxPassword, setMailboxPassword] = useState("");
+  const [mailboxWorking, setMailboxWorking] = useState(false);
+  const [mailboxUnbindConfirm, setMailboxUnbindConfirm] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
   const browserSpeechIdRef = useRef<string | null>(null);
@@ -123,6 +136,7 @@ export function ChatClient() {
   useEffect(() => {
     void loadContext();
     void loadTickets();
+    void loadWinmailBinding();
   }, []);
 
   useEffect(() => {
@@ -300,6 +314,58 @@ export function ChatClient() {
     }
   }
 
+  async function loadWinmailBinding() {
+    try {
+      const response = await fetch("/api/integrations/winmail/binding", { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "邮箱连接状态加载失败");
+      setWinmailBinding(data.binding);
+    } catch {
+      setWinmailBinding(null);
+    }
+  }
+
+  async function bindWinmailMailbox() {
+    if (!mailboxEmail.trim() || !mailboxPassword) return;
+    setMailboxWorking(true);
+    try {
+      const response = await fetch("/api/integrations/winmail/binding", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: mailboxEmail.trim(), password: mailboxPassword })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "邮箱连接失败");
+      setWinmailBinding({ ...data.binding, encryption_ready: true });
+      setMailboxPassword("");
+      setMailboxDialogOpen(false);
+      pushSuccess("个人邮箱已连接", `已验证 ${data.binding.email_masked}`);
+    } catch (error) {
+      pushActionError(error, "邮箱连接失败");
+    } finally {
+      setMailboxWorking(false);
+    }
+  }
+
+  async function unbindWinmailMailbox() {
+    setMailboxWorking(true);
+    try {
+      const response = await fetch("/api/integrations/winmail/binding", { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "邮箱解绑失败");
+      setWinmailBinding({ bound: false, email_masked: "", verified_at: null, encryption_ready: true });
+      setMailboxEmail("");
+      setMailboxPassword("");
+      setMailboxUnbindConfirm(false);
+      setMailboxDialogOpen(false);
+      pushSuccess("个人邮箱已解除连接");
+    } catch (error) {
+      pushActionError(error, "邮箱解绑失败");
+    } finally {
+      setMailboxWorking(false);
+    }
+  }
+
   async function loadMessages(id: string) {
     if (streamingRef.current) {
       return;
@@ -429,6 +495,12 @@ export function ChatClient() {
                   }
                 : message
             )
+          );
+        }
+
+        if (event.type === "tool_result") {
+          setMessages((current) =>
+            current.map((message) => message.id === assistantTempId ? { ...message, metadata: event.metadata } : message)
           );
         }
 
@@ -1173,12 +1245,21 @@ export function ChatClient() {
                   : "输入问题后会优先根据公司资料回答，也可以反馈或转人工。"}
               </p>
             </div>
-            <KnowledgeBaseSelect
-              value={selectedKnowledgeBaseId}
-              knowledgeBases={knowledgeBases}
-              disabled={contextLoading || loading}
-              onChange={setSelectedKnowledgeBaseId}
-            />
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+              <button
+                type="button"
+                onClick={() => { setMailboxUnbindConfirm(false); setMailboxDialogOpen(true); }}
+                className={`inline-flex h-11 items-center justify-center gap-2 rounded-full border px-3 text-sm font-semibold transition ${winmailBinding?.bound ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-line bg-white text-slate-600 hover:border-cyan/30 hover:text-brand"}`}
+              >
+                <Mail size={16} />{winmailBinding?.bound ? "邮箱已连接" : "连接邮箱"}
+              </button>
+              <KnowledgeBaseSelect
+                value={selectedKnowledgeBaseId}
+                knowledgeBases={knowledgeBases}
+                disabled={contextLoading || loading}
+                onChange={setSelectedKnowledgeBaseId}
+              />
+            </div>
           </div>
         </div>
 
@@ -1220,13 +1301,19 @@ export function ChatClient() {
                   <p className="whitespace-pre-wrap text-sm leading-6">
                     {displayContent || (message.role === "assistant" ? "正在查找资料..." : "")}
                   </p>
+                  {message.role === "assistant" && message.metadata && (
+                    <BusinessToolResultPanel
+                      metadata={message.metadata}
+                      onBindMailbox={() => { setMailboxUnbindConfirm(false); setMailboxDialogOpen(true); }}
+                    />
+                  )}
                   {message.role === "assistant" && retryQuestion && (
                     <RetryAnswerNotice
                       loading={loading}
                       onRetry={() => retryFailedMessage(message.id, retryQuestion)}
                     />
                   )}
-                  {message.role === "assistant" && message.content && !failedAnswer && (
+                  {message.role === "assistant" && message.content && !failedAnswer && !isBusinessToolMetadata(message.metadata) && (
                     <AnswerNotice
                       content={message.content}
                       citationCount={message.citations.length}
@@ -1371,9 +1458,69 @@ export function ChatClient() {
           onConfirm={() => void deleteArchivedConversation()}
         />
       )}
+      {mailboxDialogOpen && (
+        <WinmailBindingDialog
+          binding={winmailBinding}
+          email={mailboxEmail}
+          password={mailboxPassword}
+          working={mailboxWorking}
+          confirmUnbind={mailboxUnbindConfirm}
+          onEmailChange={setMailboxEmail}
+          onPasswordChange={setMailboxPassword}
+          onBind={() => void bindWinmailMailbox()}
+          onRequestUnbind={() => setMailboxUnbindConfirm(true)}
+          onCancelUnbind={() => setMailboxUnbindConfirm(false)}
+          onUnbind={() => void unbindWinmailMailbox()}
+          onClose={() => { if (!mailboxWorking) { setMailboxDialogOpen(false); setMailboxPassword(""); setMailboxUnbindConfirm(false); } }}
+        />
+      )}
     </div>
   );
 }
+
+function BusinessToolResultPanel({ metadata, onBindMailbox }: { metadata: Record<string, unknown>; onBindMailbox: () => void }) {
+  if (metadata.kind === "business_tool_error") {
+    return <div className="mt-3 border-t border-line pt-3"><p className="text-xs font-semibold text-amber-700">Winmail · 仅本人邮箱</p>{metadata.action_required === "bind_winmail" && <button type="button" onClick={onBindMailbox} className="ui-button-primary mt-2 h-9 px-3"><Mail size={15} />连接个人邮箱</button>}</div>;
+  }
+  if (metadata.kind !== "business_tool" || !metadata.result || typeof metadata.result !== "object") return null;
+  const result = metadata.result as Record<string, unknown>;
+  const messages = Array.isArray(result.messages) ? result.messages as Array<Record<string, unknown>> : [];
+  return <section className="mt-3 border-t border-line pt-3" aria-label="Winmail 查询结果">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500"><span className="font-semibold text-brand">Winmail</span><span>{String(metadata.data_scope ?? "仅本人邮箱")}</span><span>{formatToolDate(String(metadata.queried_at ?? ""))}</span></div>
+    {result.type === "winmail_unread" && <p className="mt-2 text-2xl font-semibold tabular-nums text-ink">{Number(result.unread ?? 0)}<span className="ml-1 text-sm font-medium text-slate-500">封未读</span></p>}
+    {result.type === "winmail_message_list" && messages.length > 0 && <div className="mt-2 divide-y divide-line border-y border-line">
+      {messages.map((item, index) => <div key={String(item.id ?? index)} className="py-3">
+        <div className="flex items-start justify-between gap-3"><p className="min-w-0 break-words text-sm font-semibold text-ink">{String(item.subject || "（无主题）")}</p>{item.unread === true && <span className="shrink-0 rounded-full bg-cyan/10 px-2 py-0.5 text-[11px] font-semibold text-brand">未读</span>}</div>
+        <p className="mt-1 break-all text-xs text-slate-600">{String(item.sender_name || item.sender_email || "未知发件人")}{item.sender_name && item.sender_email ? ` · ${String(item.sender_email)}` : ""}</p>
+        <p className="mt-1 text-xs text-slate-400">{formatToolDate(String(item.sent_at ?? ""))}{item.has_attachment === true ? " · 有附件" : ""}{item.size ? ` · ${String(item.size)}` : ""}</p>
+      </div>)}
+    </div>}
+  </section>;
+}
+
+function WinmailBindingDialog({ binding, email, password, working, confirmUnbind, onEmailChange, onPasswordChange, onBind, onRequestUnbind, onCancelUnbind, onUnbind, onClose }: {
+  binding: WinmailBinding | null; email: string; password: string; working: boolean; confirmUnbind: boolean;
+  onEmailChange: (value: string) => void; onPasswordChange: (value: string) => void; onBind: () => void;
+  onRequestUnbind: () => void; onCancelUnbind: () => void; onUnbind: () => void; onClose: () => void;
+}) {
+  return <div className="fixed inset-0 z-[950] flex items-end justify-center bg-slate-950/45 p-3 backdrop-blur-sm sm:items-center" role="dialog" aria-modal="true" aria-labelledby="winmail-binding-title">
+    <section className="w-full max-w-md rounded-lg border border-line bg-white p-5 shadow-panel">
+      <div className="flex items-start justify-between gap-3"><div><h2 id="winmail-binding-title" className="text-base font-semibold text-ink">个人 Winmail 邮箱</h2><p className="mt-1 text-sm text-slate-500">{binding?.bound ? `已连接 ${binding.email_masked}` : "验证后可在对话中查询本人邮件摘要"}</p></div><button type="button" onClick={onClose} disabled={working} aria-label="关闭邮箱连接框" className="grid size-9 place-items-center rounded-lg text-slate-500 hover:bg-slate-100"><X size={16} /></button></div>
+      {binding?.bound ? <div className="mt-4">
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-800"><p className="font-semibold">身份已验证</p><p className="mt-1">{binding.email_masked}</p></div>
+        {confirmUnbind ? <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3"><p className="text-sm text-red-800">解除后将删除加密凭证，不能继续查询邮箱。</p><div className="mt-3 flex justify-end gap-2"><button type="button" onClick={onCancelUnbind} disabled={working} className="ui-button-secondary h-10">取消</button><button type="button" onClick={onUnbind} disabled={working} className="inline-flex h-10 items-center gap-2 rounded-lg bg-red-600 px-3 text-sm font-semibold text-white">{working && <Loader2 size={15} className="animate-spin" />}确认解除</button></div></div> : <button type="button" onClick={onRequestUnbind} className="mt-4 text-sm font-semibold text-red-700 hover:text-red-800">解除邮箱连接</button>}
+      </div> : <div className="mt-4 space-y-3">
+        {!binding?.encryption_ready && <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">服务器凭证加密尚未就绪，请联系管理员。</p>}
+        <label className="block"><span className="text-sm font-medium text-slate-700">邮箱地址</span><input type="email" value={email} onChange={(event) => onEmailChange(event.target.value)} autoComplete="username" className="ui-input mt-1 h-11 w-full" placeholder="name@company.com" /></label>
+        <label className="block"><span className="text-sm font-medium text-slate-700">邮箱密码</span><input type="password" value={password} onChange={(event) => onPasswordChange(event.target.value)} autoComplete="current-password" className="ui-input mt-1 h-11 w-full" /></label>
+        <button type="button" onClick={onBind} disabled={working || !binding?.encryption_ready || !email.trim() || !password} className="ui-button-primary h-11 w-full justify-center">{working ? <Loader2 size={16} className="animate-spin" /> : <Mail size={16} />}验证并连接</button>
+      </div>}
+    </section>
+  </div>;
+}
+
+function isBusinessToolMetadata(metadata: Record<string, unknown> | undefined) { return metadata?.kind === "business_tool" || metadata?.kind === "business_tool_error"; }
+function formatToolDate(value: string) { if (!value) return ""; const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", { hour12: false }); }
 
 function EmptyChatState({
   hasSearchableScope,

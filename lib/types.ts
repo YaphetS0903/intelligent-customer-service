@@ -360,6 +360,7 @@ export type Message = {
   content: string;
   citations: Citation[];
   model: string | null;
+  metadata?: Record<string, unknown>;
   created_at: string;
 };
 

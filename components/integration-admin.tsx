@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Building2, CheckCircle2, ChevronDown, CircleAlert, Link2, Loader2, Mail, RefreshCw, Search, Send, Settings2, Unlink, UsersRound, X } from "lucide-react";
+import { Building2, CheckCircle2, ChevronDown, CircleAlert, Link2, Loader2, Mail, RefreshCw, Search, Send, Settings2, Unlink, UsersRound, Wrench, X } from "lucide-react";
 import { ActionConfirmDialog, ErrorRetry, PanelSkeleton, useToast, type ActionConfirmRequest } from "@/components/ui-feedback";
-import type { IntegrationConnector, IntegrationDeliveryLog, IntegrationDirectoryMember, IntegrationSyncRun, IntegrationUserIdentity } from "@/lib/integrations/types";
+import type { IntegrationConnector, IntegrationDeliveryLog, IntegrationDirectoryMember, IntegrationSyncRun, IntegrationTool, IntegrationToolExecution, IntegrationUserIdentity } from "@/lib/integrations/types";
 
 type Dashboard = {
   connectors: IntegrationConnector[];
@@ -16,9 +16,11 @@ type Dashboard = {
   users: Array<{ id: string; name: string; email: string; department: string; position: string }>;
   sync_runs: IntegrationSyncRun[];
   delivery_logs: IntegrationDeliveryLog[];
+  tools: IntegrationTool[];
+  tool_executions: IntegrationToolExecution[];
 };
 
-type View = "connectors" | "directory" | "logs";
+type View = "connectors" | "directory" | "tools" | "logs";
 type DirectoryMember = Dashboard["directory"]["members"][number];
 type ConfirmState = ActionConfirmRequest & { action: () => Promise<void> };
 
@@ -201,6 +203,23 @@ export function IntegrationAdmin() {
     if (action) await action();
   }
 
+  async function toggleTool(tool: IntegrationTool) {
+    setWorking(`tool:${tool.id}`);
+    try {
+      const response = await fetch(`/api/admin/integration-tools/${encodeURIComponent(tool.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: tool.status !== "published" })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "工具状态更新失败");
+      pushToast({ tone: "success", title: data.tool.status === "published" ? "业务工具已启用" : "业务工具已停用", description: data.tool.name });
+      await load();
+    } catch (error) {
+      pushToast({ tone: "error", title: "工具状态更新失败", description: error instanceof Error ? error.message : "请稍后重试" });
+    } finally { setWorking(null); }
+  }
+
   if (loading && !dashboard) return <IntegrationSkeleton />;
   if (loadError && !dashboard) return <ErrorRetry title="集成中心加载失败" message={loadError} retrying={loading} onRetry={() => void load()} />;
   if (!dashboard) return null;
@@ -213,7 +232,7 @@ export function IntegrationAdmin() {
       <header className="flex flex-col gap-3 border-b border-line pb-3 sm:flex-row sm:items-center sm:justify-between" data-testid="integrations-header">
         <div className="flex min-w-0 items-center gap-2.5">
           <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-cyan/10 text-brand"><Settings2 size={18} /></span>
-          <div className="min-w-0"><h1 className="text-xl font-semibold text-ink">业务集成</h1><p className="truncate text-sm text-slate-500">企业微信通讯录与应用通知、Winmail 邮件通知</p></div>
+          <div className="min-w-0"><h1 className="text-xl font-semibold text-ink">业务集成</h1><p className="truncate text-sm text-slate-500">连接器、身份映射、业务工具与调用审计</p></div>
         </div>
         <button type="button" onClick={() => void load()} disabled={loading} className="ui-button-secondary h-10 self-start sm:self-auto">{loading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}刷新</button>
       </header>
@@ -222,12 +241,13 @@ export function IntegrationAdmin() {
         <Metric label="连接器" value="2" />
         <Metric label="健康" value={dashboard.connectors.filter((item) => item.health_status === "healthy").length} tone="good" />
         <Metric label="通讯录成员" value={dashboard.directory.total} />
-        <Metric label="已匹配账号" value={dashboard.directory.matched} tone="good" />
+        <Metric label="已启用工具" value={dashboard.tools.filter((item) => item.status === "published").length} tone="good" />
       </section>
 
-      <section className="ui-card grid grid-cols-3 gap-1 p-1.5" aria-label="业务集成视图">
+      <section className="ui-card grid grid-cols-2 gap-1 p-1.5 sm:grid-cols-4" aria-label="业务集成视图">
         <ViewButton active={view === "connectors"} onClick={() => setView("connectors")}>连接器</ViewButton>
         <ViewButton active={view === "directory"} onClick={() => setView("directory")}>通讯录·{dashboard.directory.total}</ViewButton>
+        <ViewButton active={view === "tools"} onClick={() => setView("tools")}>业务工具·{dashboard.tools.length}</ViewButton>
         <ViewButton active={view === "logs"} onClick={() => setView("logs")}>同步与投递</ViewButton>
       </section>
 
@@ -261,7 +281,7 @@ export function IntegrationAdmin() {
             <div className="mt-4 border-t border-line pt-4"><label className="text-sm font-medium text-slate-700" htmlFor="wecom-test-user">测试接收账号</label><div className="mt-2 flex flex-col gap-2 sm:flex-row"><select id="wecom-test-user" value={testWecomUserId} onChange={(event) => setTestWecomUserId(event.target.value)} className="ui-input h-10 min-w-0 flex-1"><option value="">{wecomRecipients.length ? "请选择已匹配账号" : "暂无已匹配账号"}</option>{wecomRecipients.map((identity) => <option key={identity.id} value={identity.user_id}>{identity.local_user?.name}（{identity.local_user?.email}）</option>)}</select><button type="button" onClick={requestTestWecomMessage} disabled={working !== null || !testWecomUserId || !dashboard.configs.wecom.enabled || !dashboard.configs.wecom.notification_configured} className="ui-button-success h-10">{working === "wecom:message" ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}发送测试消息</button></div>{!dashboard.configs.wecom.notification_configured && <p className="mt-2 text-xs text-amber-700">配置应用 AgentID 后才可发送应用消息。</p>}</div>
           </ConnectorPanel>
 
-          <ConnectorPanel icon={<Mail size={18} />} title="Winmail 邮件通知" description="使用系统专用发件账号投递课程、审批、工单和安全通知，不保存员工邮箱密码。" connector={winmailConnector}>
+          <ConnectorPanel icon={<Mail size={18} />} title="Winmail 邮件通知" description="系统专用账号负责业务通知；员工个人邮箱由本人验证，凭证独立加密保存。" connector={winmailConnector}>
             <form key={JSON.stringify(dashboard.configs.winmail)} onSubmit={(event) => { event.preventDefault(); void saveConfig("winmail", event.currentTarget); }} className="grid gap-3 sm:grid-cols-2">
               <Toggle name="WINMAIL_ENABLED" label="启用连接器" defaultChecked={dashboard.configs.winmail.enabled} />
               <Toggle name="WINMAIL_NOTIFICATION_ENABLED" label="启用业务邮件投递" defaultChecked={dashboard.configs.winmail.notification_enabled} />
@@ -281,11 +301,19 @@ export function IntegrationAdmin() {
       )}
 
       {view === "directory" && <DirectoryView dashboard={dashboard} working={working} onBind={(member) => { setBindingMember(member); setBindingUserId(""); }} onUnbind={requestUnbind} />}
+      {view === "tools" && <ToolsView tools={dashboard.tools} executions={dashboard.tool_executions} working={working} onToggle={(tool) => void toggleTool(tool)} />}
       {view === "logs" && <LogsView runs={dashboard.sync_runs} deliveries={dashboard.delivery_logs} />}
       <BindingDialog member={bindingMember} users={dashboard.users} identities={dashboard.identities} userId={bindingUserId} working={working !== null} onUserChange={setBindingUserId} onCancel={() => { setBindingMember(null); setBindingUserId(""); }} onConfirm={() => void bindIdentity()} />
       <ActionConfirmDialog request={confirmState} onCancel={() => setConfirmState(null)} onConfirm={() => void confirmAction()} />
     </div>
   );
+}
+
+function ToolsView({ tools, executions, working, onToggle }: { tools: IntegrationTool[]; executions: IntegrationToolExecution[]; working: string | null; onToggle: (tool: IntegrationTool) => void }) {
+  return <section className="grid gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,.95fr)]">
+    <div className="ui-card overflow-hidden"><div className="border-b border-line p-4"><div className="flex items-center gap-2"><Wrench size={17} className="text-brand" /><h2 className="text-base font-semibold text-ink">已注册业务工具</h2></div></div><div className="divide-y divide-line">{tools.map((tool) => <div key={tool.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="font-semibold text-ink">{tool.name}</p><span className="rounded-full bg-cyan/10 px-2 py-0.5 text-xs font-medium text-brand">只读 · 仅本人</span></div><p className="mt-1 text-sm leading-6 text-slate-500">{tool.description}</p><p className="mt-1 text-xs text-slate-400">{tool.id} · 超时 {tool.timeout_ms}ms · 角色 {tool.allowed_roles.join("/")}</p></div><button type="button" onClick={() => onToggle(tool)} disabled={Boolean(working)} className={tool.status === "published" ? "ui-button-secondary h-10 shrink-0" : "ui-button-primary h-10 shrink-0"}>{working === `tool:${tool.id}` && <Loader2 size={15} className="animate-spin" />}{tool.status === "published" ? "停用" : "启用"}</button></div>)}</div></div>
+    <div className="ui-card p-4"><h2 className="text-base font-semibold text-ink">最近调用审计</h2><div className="mt-3 divide-y divide-line">{executions.slice(0, 30).map((item) => <div key={item.id} className="py-3"><div className="flex items-center justify-between gap-3"><p className="min-w-0 truncate text-sm font-semibold text-ink">{tools.find((tool) => tool.id === item.tool_id)?.name ?? item.tool_id}</p><ToolExecutionStatus status={item.status} /></div><p className="mt-1 text-xs text-slate-500">来源 {item.source === "chat" ? "员工对话" : item.source === "api" ? "工具接口" : "管理员测试"} · {item.latency_ms ?? 0}ms</p>{item.error_message && <p className="mt-1 text-xs text-red-700">{item.error_message}</p>}<p className="mt-1 text-xs text-slate-400">{formatDate(item.started_at)}</p></div>)}{executions.length === 0 && <p className="py-8 text-center text-sm text-slate-500">暂无工具调用记录。</p>}</div></div>
+  </section>;
 }
 
 function ConnectorPanel({ icon, title, description, connector, children }: { icon: React.ReactNode; title: string; description: string; connector?: IntegrationConnector; children: React.ReactNode }) {
@@ -332,5 +360,6 @@ function HealthBadge({ connector }: { connector?: IntegrationConnector }) { cons
 function StatusText({ status }: { status: string }) { return <span className={`rounded-full px-2 py-1 text-xs font-medium ${status === "active" ? "bg-emerald-50 text-emerald-700" : status === "disabled" ? "bg-slate-100 text-slate-600" : "bg-amber-50 text-amber-700"}`}>{status === "active" ? "在职" : status === "disabled" ? "停用" : "已离开可见范围"}</span>; }
 function RunStatus({ status }: { status: string }) { return <span className={`text-xs font-semibold ${status === "success" ? "text-emerald-700" : status === "failed" ? "text-red-700" : "text-amber-700"}`}>{status === "success" ? "成功" : status === "failed" ? "失败" : status === "running" ? "进行中" : "部分成功"}</span>; }
 function DeliveryStatus({ status }: { status: string }) { return <span className={`text-xs font-semibold ${status === "sent" ? "text-emerald-700" : status === "failed" ? "text-red-700" : "text-slate-500"}`}>{status === "sent" ? "已发送" : status === "failed" ? "失败" : status === "sending" ? "发送中" : "已跳过"}</span>; }
+function ToolExecutionStatus({ status }: { status: IntegrationToolExecution["status"] }) { const label = status === "success" ? "成功" : status === "running" ? "执行中" : status === "denied" ? "已拦截" : "失败"; const color = status === "success" ? "text-emerald-700" : status === "running" ? "text-slate-500" : status === "denied" ? "text-amber-700" : "text-red-700"; return <span className={`shrink-0 text-xs font-semibold ${color}`}>{label}</span>; }
 function formatDate(value: string | null) { return value ? new Date(value).toLocaleString("zh-CN") : "-"; }
 function IntegrationSkeleton() { return <div className="space-y-4"><PanelSkeleton rows={2} /><section className="grid grid-cols-2 gap-3 xl:grid-cols-4">{Array.from({ length: 4 }).map((_, index) => <PanelSkeleton key={index} rows={1} />)}</section><section className="grid gap-3 xl:grid-cols-2"><PanelSkeleton rows={8} /><PanelSkeleton rows={8} /></section></div>; }

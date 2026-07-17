@@ -795,6 +795,50 @@ test.describe("天瑞内饰智能客服回归", () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBeTruthy();
   });
 
+  test("Winmail 只读工具执行权限、未绑定提示和管理员审计闭环", async ({ page }) => {
+    const employee = await tryLogin(page, "employee");
+    const binding = await page.request.get("/api/integrations/winmail/binding");
+    expect(binding.ok(), await binding.text()).toBeTruthy();
+    expect((await binding.json()).binding).toEqual(expect.objectContaining({ bound: false, encryption_ready: true }));
+
+    const invalid = await page.request.post("/api/tools/execute", {
+      data: { tool_id: "winmail.search_inbox", params: { arbitrary_url: "http://example.com" } },
+      failOnStatusCode: false
+    });
+    expect(invalid.status()).toBe(400);
+    expect((await invalid.json()).code).toBe("INVALID_INPUT");
+
+    const chat = await page.request.post("/api/chat", {
+      data: { message: "我有多少封未读邮件？" },
+      failOnStatusCode: false
+    });
+    expect(chat.ok(), await chat.text()).toBeTruthy();
+    const chatData = await chat.json() as { messages: Array<{ role: string; metadata?: Record<string, unknown> }> };
+    expect(chatData.messages.find((item) => item.role === "assistant")?.metadata).toEqual(expect.objectContaining({
+      kind: "business_tool_error",
+      tool_id: "winmail.unread_count",
+      error_code: "MAILBOX_NOT_BOUND",
+      action_required: "bind_winmail"
+    }));
+
+    await tryLogin(page);
+    const dashboard = await getWithRetry(page, "/api/admin/integrations", 5);
+    const dashboardData = await dashboard.json() as { tools: Array<{ id: string; status: string }>; tool_executions: Array<{ user_id: string; tool_id: string; status: string; input_summary: Record<string, unknown> }> };
+    expect(dashboardData.tools).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "winmail.unread_count", status: "published" }),
+      expect.objectContaining({ id: "winmail.search_inbox", status: "published" })
+    ]));
+    expect(dashboardData.tool_executions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ user_id: employee.id, tool_id: "winmail.unread_count", status: "failed", input_summary: expect.objectContaining({ scope: "self" }) })
+    ]));
+
+    await gotoWithRetry(page, "/admin/integrations");
+    await page.getByRole("button", { name: /业务工具·/ }).click();
+    await expect(page.getByRole("heading", { name: "已注册业务工具" })).toBeVisible();
+    await expect(page.getByText("查询本人未读邮件数量")).toBeVisible();
+    await expect(page.getByText("最近调用审计")).toBeVisible();
+  });
+
   test("问答测试后台暴露整改复测队列和趋势数据", async ({ page }) => {
     test.setTimeout(150_000);
 
